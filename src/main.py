@@ -1,13 +1,13 @@
 import sys
 from typing import List
 
-from PyQt6.QtCore import QSize, Qt
-from PyQt6.QtWidgets import QApplication, QMainWindow, QPushButton
-
 import networkx as nx
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
+
+from PyQt6.QtWidgets import QApplication
+from ui import MainWindow
 
 grid_size: int = 10
 edge_prob: float = 0.8
@@ -61,24 +61,8 @@ graph.remove_edges_from(to_remove)
 # plt.show()
 
 
-# Subclass QMainWindow to customize your application's main window
-class MainWindow(QMainWindow):
-    def __init__(self):
-        super().__init__()
+app = QApplication(sys.argv)
+window = MainWindow(graph)
+window.show()
 
-        self.setWindowTitle("My App")
-
-        button = QPushButton("Press Me!")
-
-        self.setFixedSize(QSize(400, 300))
-
-        # Set the central widget of the Window.
-        self.setCentralWidget(button)
-
-
-# app = QApplication(sys.argv)
-#
-# window = MainWindow()
-# window.show()
-#
-# app.exec()
+app.exec()
