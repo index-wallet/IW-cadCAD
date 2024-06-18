@@ -9,7 +9,8 @@ from cadCAD.types import (
     StateVariable,
     Substep,
 )
-from networkx import DiGraph
+
+from sim.grid import gen_econ_network
 
 
 def compute_pub_assessment(
@@ -34,7 +35,7 @@ def simulate_purchases(
     return ("", 0)
 
 
-initial_state = {"grid": DiGraph()}
+initial_state = {"grid": gen_econ_network()}
 
 psubs = [
     {
