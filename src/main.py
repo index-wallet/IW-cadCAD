@@ -7,7 +7,7 @@ import numpy as np
 import numpy.typing as npt
 
 from PyQt6.QtWidgets import QApplication
-from ui import MainWindow
+from ui.window import MainWindow
 
 grid_size: int = 10
 edge_prob: float = 0.8
@@ -59,6 +59,12 @@ graph.remove_edges_from(to_remove)
 
 # nx.draw_networkx(graph)
 # plt.show()
+
+
+def update_valuations(graph: nx.DiGraph) -> None:
+    for node, agent in graph.nodes.data("agent"):
+        graph.neighbors(node)
+        pass
 
 
 app = QApplication(sys.argv)
