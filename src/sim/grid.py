@@ -1,4 +1,4 @@
-from typing import List
+from typing import Dict, List, Tuple
 
 import networkx as nx
 import numpy as np
@@ -18,23 +18,25 @@ price_range: List[float] = [0.1, 0.9]
 
 
 class Agent:
-    def __init__(self) -> None:
+    def __init__(self, neighbors: List[Tuple[int, int]]) -> None:
         self.wallet: npt.NDArray[np.float64] = np.random.rand(num_currencies)
 
         self.price: float = np.random.random() * price_range[1] + price_range[0]
-        self.demand: npt.NDArray[np.float64] = (
-            np.random.rand(4) * demand_range[1] + demand_range[0]
-        )  # 4 here is number of potential neighbors, maybe use dict for more flexibility
+        # HACK: this feels hacky, but I can't use agents as keys if I want to construct them all at the same time
+        self.demand: Dict[Tuple[int, int], float] = {
+            neighbor: np.random.random() * demand_range[1] + demand_range[0]
+            for neighbor in neighbors
+        }
 
-        self.inherited_valuation: npt.NDArray[np.float64] = (
+        self.inherited_assessment: npt.NDArray[np.float64] = (
             np.random.rand(num_currencies) * valuation_range[1] + valuation_range[0]
         )
-        self.pricing_valuation: npt.NDArray[np.float64] = (
+        self.pricing_assessment: npt.NDArray[np.float64] = (
             np.random.rand(num_currencies) * valuation_range[1] + valuation_range[0]
         )
 
     def __str__(self) -> str:
-        return f"Wallet: {self.wallet}\nPrice: {self.price}\nDemand: {self.demand}\nInherited Valuation: {self.inherited_valuation}\nPricing Valuation:{self.pricing_valuation}"
+        return f"Wallet: {self.wallet}\nPrice: {self.price}\nDemand: {self.demand}\nInherited Valuation: {self.inherited_assessment}\nPricing Valuation:{self.pricing_assessment}"
 
 
 def gen_econ_network() -> nx.DiGraph:
@@ -44,7 +46,7 @@ def gen_econ_network() -> nx.DiGraph:
     )
 
     # Create agent at each node
-    node_data = {node: {"agent": Agent()} for node in graph}
+    node_data = {node: {"agent": Agent(graph[node])} for node in graph}
     nx.set_node_attributes(graph, node_data)
 
     # Dropout
