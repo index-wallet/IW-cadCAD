@@ -1,4 +1,4 @@
-from typing import Dict, Tuple, List
+from typing import Dict, Tuple, List, Any
 from cadCAD.configuration import Experiment
 from cadCAD.configuration.utils import config_sim
 from cadCAD.types import (
@@ -17,6 +17,10 @@ from sim.grid import Agent, gen_econ_network
 
 eps: float = 10**-6
 
+# ============================================================
+# Policy functions
+# ============================================================
+
 
 def compute_pricing_assessment(
     _params: Parameters, substep: Substep, state_history: StateHistory, state: State
@@ -25,7 +29,10 @@ def compute_pricing_assessment(
 
 
 def compute_inhereted_assessment(
-    _params: Parameters, substep: Substep, state_history: StateHistory, state: State
+    _params: Parameters,
+    substep: Substep,
+    state_history: StateHistory,
+    state: Dict[str, Any],
 ) -> PolicyOutput:
 
     grid: nx.DiGraph = state["grid"]
@@ -44,8 +51,8 @@ def compute_inhereted_assessment(
             util_scale: float = (
                 customer.demand[neighbor]
                 / vendor.price
-                / np.linalg.norm(customer.wallet)
-                * np.dot(customer.wallet, vendor.pricing_assessment)
+                * np.dot(customer.wallet, state["pricing_assessments"][neighbor])
+                # / np.linalg.norm(customer.wallet) # This line is constant factor, unneeded
             )
 
             if util_scale > max_util_scale:
@@ -56,9 +63,9 @@ def compute_inhereted_assessment(
 
         # Add node data to policy dict
         # HACK: this could break if best vendors list is empty
-        inherited_assessments[node] = grid[nodes_best_vendors[0]][
-            "agent"
-        ].pricing_assessment
+        inherited_assessments[node] = state["pricing_assessments"][
+            nodes_best_vendors[0]
+        ]
         best_vendors[node] = nodes_best_vendors
 
     return {
@@ -67,15 +74,78 @@ def compute_inhereted_assessment(
     }
 
 
+# ============================================================
+# State update functions
+# ============================================================
+
+
 def simulate_purchases(
     _params: Parameters,
     substep: Substep,
     state_history: StateHistory,
-    state: State,
+    state: Dict[str, Any],
+    _input: Dict[str, Any],
+) -> Tuple[str, StateVariable]:
+    grid = state["grid"].copy()
+
+    # TODO: I want to iterate this in a random order
+    for node in grid.nodes:
+        customer: Agent = node["agent"]
+
+        # randomly choose vendor to buy from
+        vendor_coords = np.random.choice(_input["best_vendors"][node])
+        vendor: Agent = grid[vendor_coords]["agent"]
+
+        # check if node has enough money and wants product more than cost
+        # TODO: calculate payment magnitude
+        required_payment_mag: float = vendor.price / np.dot(customer.wallet, _input["pricing_assessments"][vendor_coords])
+
+        can_pay: bool = bool(required_payment_mag < np.linalg.norm(customer.wallet))
+        wants_product: bool = customer.demand[vendor_coords] > vendor.price * np.dot(
+            customer.wallet, _input["inhereted_assessments"][node]
+        ) / np.dot(customer.wallet, _input["pricing_assessments"][vendor_coords])
+
+        if can_pay and wants_product:
+            payment = customer.wallet * required_payment_mag
+            customer.wallet -= payment
+            vendor.wallet += payment
+
+    return ("grid", grid)
+
+
+def update_best_vendors(
+    _params: Parameters,
+    substep: Substep,
+    state_history: StateHistory,
+    state: Dict[str, Any],
     _input: PolicyOutput,
 ) -> Tuple[str, StateVariable]:
-    return ("", 0)
+    return ("best_vendors", _input["best_vendors"])
 
+
+def update_inherited_assessments(
+    _params: Parameters,
+    substep: Substep,
+    state_history: StateHistory,
+    state: Dict[str, Any],
+    _input: PolicyOutput,
+) -> Tuple[str, StateVariable]:
+    return ("inherited_assessments", _input["inherited_assessments"])
+
+
+def update_pricing_assessments(
+    _params: Parameters,
+    substep: Substep,
+    state_history: StateHistory,
+    state: Dict[str, Any],
+    _input: PolicyOutput,
+) -> Tuple[str, StateVariable]:
+    return ("pricing_assessments", _input["pricing_assessments"])
+
+
+# ============================================================
+# Sim configuration
+# ============================================================
 
 # TODO: move state creation code here
 initial_state = {
@@ -91,7 +161,7 @@ psubs = [
             "pub_assessment": compute_pricing_assessment,
             "inhereted_assessment": compute_inhereted_assessment,
         },
-        "variables": {"wallets": simulate_purchases},
+        "variables": {"grid": simulate_purchases},
     }
 ]
 
