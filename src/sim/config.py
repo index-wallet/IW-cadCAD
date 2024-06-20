@@ -13,7 +13,7 @@ import networkx as nx
 import numpy as np
 import numpy.typing as npt
 
-from sim.grid import Agent, gen_econ_network
+from sim.grid import Agent, gen_econ_network, gen_random_assessments
 
 eps: float = 10**-6
 
@@ -39,14 +39,14 @@ def compute_inhereted_assessment(
     inherited_assessments: Dict[Tuple[int, int], npt.NDArray[np.float64]] = {}
     best_vendors: Dict[Tuple[int, int], List[Tuple[int, int]]] = {}
 
-    for node in grid.nodes:
-        customer: Agent = node["agent"]
+    for node, data in grid.nodes(data=True):
+        customer: Agent = data["agent"]
         nodes_best_vendors: List[Tuple[int, int]] = []
-        max_util_scale: float = 0
+        max_util_scale: float = -np.inf
 
         # Find best vendor among neighbors
         for neighbor in grid[node]:
-            vendor: Agent = neighbor["agent"]
+            vendor: Agent = grid.nodes[neighbor]["agent"]
 
             util_scale: float = (
                 customer.demand[neighbor]
@@ -89,16 +89,18 @@ def simulate_purchases(
     grid = state["grid"].copy()
 
     # TODO: I want to iterate this in a random order
-    for node in grid.nodes:
-        customer: Agent = node["agent"]
+    for node, data in grid.nodes(data=True):
+        customer: Agent = data["agent"]
 
         # randomly choose vendor to buy from
-        vendor_coords = np.random.choice(_input["best_vendors"][node])
-        vendor: Agent = grid[vendor_coords]["agent"]
+        vendor_idx = np.random.choice(len(_input["best_vendors"][node]))
+        vendor_coords = _input["best_vendors"][node][vendor_idx]
+        vendor: Agent = grid.nodes[vendor_coords]["agent"]
 
         # check if node has enough money and wants product more than cost
-        # TODO: calculate payment magnitude
-        required_payment_mag: float = vendor.price / np.dot(customer.wallet, _input["pricing_assessments"][vendor_coords])
+        required_payment_mag: float = vendor.price / np.dot(
+            customer.wallet, _input["pricing_assessments"][vendor_coords]
+        )
 
         can_pay: bool = bool(required_payment_mag < np.linalg.norm(customer.wallet))
         wants_product: bool = customer.demand[vendor_coords] > vendor.price * np.dot(
@@ -148,11 +150,13 @@ def update_pricing_assessments(
 # ============================================================
 
 # TODO: move state creation code here
+initial_graph = gen_econ_network()
+
 initial_state = {
-    "grid": gen_econ_network(),
+    "grid": initial_graph,
     "best_vendors": {},
-    "inherited_assessments": {},
-    "pricing_assessments": {},
+    "inherited_assessments": gen_random_assessments(initial_graph),
+    "pricing_assessments": gen_random_assessments(initial_graph),
 }
 
 psubs = [
@@ -165,10 +169,10 @@ psubs = [
     }
 ]
 
-sim_config = config_sim({"N": 2, "T": range(100), "M": {}})
+sim_config = config_sim({"N": 2, "T": range(100)})
 
 exp = Experiment()
-exp.append_model(
+exp.append_configs(
     model_id="first_order_iw",
     sim_configs=sim_config,
     initial_state=initial_state,

@@ -28,13 +28,6 @@ class Agent:
             for neighbor in neighbors
         }
 
-        # self.inherited_assessment: npt.NDArray[np.float64] = (
-        #     np.random.rand(num_currencies) * valuation_range[1] + valuation_range[0]
-        # )
-        # self.pricing_assessment: npt.NDArray[np.float64] = (
-        #     np.random.rand(num_currencies) * valuation_range[1] + valuation_range[0]
-        # )
-
     def __str__(self) -> str:
         return f"Wallet: {self.wallet}\nPrice: {self.price}\nDemand: {self.demand}\nInherited Valuation: {self.inherited_assessment}\nPricing Valuation:{self.pricing_assessment}"
 
@@ -57,3 +50,10 @@ def gen_econ_network() -> nx.DiGraph:
     graph.remove_edges_from(to_remove)
 
     return graph
+
+
+def gen_random_assessments(graph: nx.DiGraph):
+    return {
+        node: np.random.rand(num_currencies) * valuation_range[1] + valuation_range[0]
+        for node in graph.nodes
+    }
