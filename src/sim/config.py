@@ -1,10 +1,9 @@
-from typing import Dict, Tuple, List, Any
+from typing import Callable, Dict, Tuple, List, Any
 from cadCAD.configuration import Experiment
 from cadCAD.configuration.utils import config_sim
 from cadCAD.types import (
     Parameters,
     PolicyOutput,
-    State,
     StateHistory,
     StateVariable,
     Substep,
@@ -12,9 +11,16 @@ from cadCAD.types import (
 import networkx as nx
 import numpy as np
 import numpy.typing as npt
+import scipy.optimize
+
+from itertools import chain, combinations
+import warnings
 
 from sim.grid import Agent, gen_econ_network, gen_random_assessments
 
+warnings.filterwarnings(
+    "ignore", message="delta_grad == 0.0. Check if the approximated function is linear."
+)
 eps: float = 10**-6
 
 # ============================================================
@@ -23,12 +29,96 @@ eps: float = 10**-6
 
 
 def compute_pricing_assessment(
-    _params: Parameters, substep: Substep, state_history: StateHistory, state: State
+    _params: Parameters,
+    substep: Substep,
+    state_history: StateHistory,
+    state: Dict[str, Any],
 ) -> PolicyOutput:
-    return {"pricing_assessments": state["pricing_assessments"]}
+
+    grid: nx.DiGraph = state["grid"]
+    pricing_assessments: Dict[Tuple[int, int], npt.NDArray] = {}
+    # Fill if needed (on first iteration)
+    best_vendors = state["best_vendors"]
+    if best_vendors == {}:
+        best_vendors = {
+            node: get_best_vendors(grid, node, state["pricing_assessments"])
+            for node in grid
+        }
+    print(f"Starting optimization, timestep{state["timestep"]}")
+
+    for node in grid.nodes():
+        customer_idx = grid[node]
+        customers = [grid.nodes[idx]["agent"] for idx in customer_idx]
+        customer_combos = powerset(
+            zip(customer_idx, customers)
+        )  # PERF: For highly connected topologies, this becomes inefficient
+        me: Agent = grid.nodes[node]["agent"]
+
+        def get_profit_func(
+            customer_combo: List[Tuple[Tuple[int, int], Agent]],
+        ) -> Callable[[npt.NDArray], float]:
+            """Returns experienced utility when selling to every customer in combo list"""
+            # PERF: This can definitely be optimized using np native functions
+
+            def profit_func(assessment: npt.NDArray) -> float:
+                profit: float = 0
+
+                for customer_idx, customer in customer_combo:
+                    profit += (
+                        np.dot(customer.wallet, state["inherited_assessments"][node])
+                        / np.dot(customer.wallet, state["pricing_assessments"][node])
+                        / (1 + len(best_vendors[customer_idx]))
+                    )
+
+                # negative here b/c scipy only minimizes
+                return -profit * me.price
+
+            return profit_func
+
+        max_profit = 0
+        best_assessment = np.array([])
+
+        # Find optimal assessment for every combo
+        for combo in customer_combos:
+            objective = get_profit_func(list(combo))
+
+            constraint = scipy.optimize.LinearConstraint(
+                np.array([customer.wallet for _, customer in combo]),
+                lb=np.array(
+                    [
+                        me.price
+                        * np.dot(customer.wallet, state["inherited_assessments"][node])
+                        / (
+                            customer.demand[node]
+                            - customer.demand[best_vendors[idx][0]]
+                            + grid.nodes[best_vendors[idx][0]]["agent"].price
+                        )
+                        for idx, customer in combo
+                    ]
+                ),
+            )
+
+            result = scipy.optimize.minimize(
+                objective,
+                state["inherited_assessments"][node],
+                constraints=constraint,
+                method="trust-constr",
+            )
+
+            profit: float = -result.fun
+            assessment: npt.NDArray = result.x
+
+            # Search optimal profit over every combo
+            if profit > max_profit:
+                max_profit = profit
+                best_assessment = assessment
+
+        pricing_assessments[node] = best_assessment
+
+    return {"pricing_assessments": pricing_assessments}
 
 
-def compute_inhereted_assessment(
+def compute_inherited_assessment(
     _params: Parameters,
     substep: Substep,
     state_history: StateHistory,
@@ -39,27 +129,9 @@ def compute_inhereted_assessment(
     inherited_assessments: Dict[Tuple[int, int], npt.NDArray[np.float64]] = {}
     best_vendors: Dict[Tuple[int, int], List[Tuple[int, int]]] = {}
 
-    for node, data in grid.nodes(data=True):
-        customer: Agent = data["agent"]
-        nodes_best_vendors: List[Tuple[int, int]] = []
-        max_util_scale: float = -np.inf
-
+    for node in grid.nodes():
         # Find best vendor among neighbors
-        for neighbor in grid[node]:
-            vendor: Agent = grid.nodes[neighbor]["agent"]
-
-            util_scale: float = (
-                customer.demand[neighbor]
-                / vendor.price
-                * np.dot(customer.wallet, state["pricing_assessments"][neighbor])
-                # / np.linalg.norm(customer.wallet) # This line is constant factor, unneeded
-            )
-
-            if util_scale > max_util_scale:
-                max_util_scale = util_scale
-                nodes_best_vendors = [neighbor]
-            elif max_util_scale - util_scale < eps:
-                nodes_best_vendors.append(neighbor)
+        nodes_best_vendors = get_best_vendors(grid, node, state["pricing_assessments"])
 
         # Add node data to policy dict
         # HACK: this could break if best vendors list is empty
@@ -69,9 +141,41 @@ def compute_inhereted_assessment(
         best_vendors[node] = nodes_best_vendors
 
     return {
-        "inhereted_assessments": inherited_assessments,
+        "inherited_assessments": inherited_assessments,
         "best_vendors": best_vendors,
     }
+
+
+def get_best_vendors(
+    grid: nx.DiGraph, node, pricing_assessments
+) -> List[Tuple[int, int]]:
+    best_vendors: List[Tuple[int, int]] = []
+    max_util_scale: float = -np.inf
+    customer: Agent = grid.nodes[node]["agent"]
+
+    for neighbor in grid[node]:
+        vendor: Agent = grid.nodes[neighbor]["agent"]
+
+        util_scale: float = (
+            customer.demand[neighbor]
+            / vendor.price
+            * np.dot(customer.wallet, pricing_assessments[neighbor])
+            # / np.linalg.norm(customer.wallet) # This line is constant factor, unneeded
+        )
+
+        if util_scale > max_util_scale:
+            max_util_scale = util_scale
+            best_vendors = [neighbor]
+        elif max_util_scale - util_scale < eps:
+            best_vendors.append(neighbor)
+
+    return best_vendors
+
+
+def powerset(iterable):
+    "Excludes empty: powerset([1,2,3]) --> (1,) (2,) (3,) (1,2) (1,3) (2,3) (1,2,3)"
+    s = list(iterable)
+    return chain.from_iterable(combinations(s, r) for r in range(1, len(s) + 1))
 
 
 # ============================================================
@@ -104,7 +208,7 @@ def simulate_purchases(
 
         can_pay: bool = bool(required_payment_mag < np.linalg.norm(customer.wallet))
         wants_product: bool = customer.demand[vendor_coords] > vendor.price * np.dot(
-            customer.wallet, _input["inhereted_assessments"][node]
+            customer.wallet, _input["inherited_assessments"][node]
         ) / np.dot(customer.wallet, _input["pricing_assessments"][vendor_coords])
 
         if can_pay and wants_product:
@@ -149,7 +253,6 @@ def update_pricing_assessments(
 # Sim configuration
 # ============================================================
 
-# TODO: move state creation code here
 initial_graph = gen_econ_network()
 
 initial_state = {
@@ -163,13 +266,18 @@ psubs = [
     {
         "policies": {
             "pub_assessment": compute_pricing_assessment,
-            "inhereted_assessment": compute_inhereted_assessment,
+            "inherited_assessment": compute_inherited_assessment,
         },
-        "variables": {"grid": simulate_purchases},
+        "variables": {
+            "grid": simulate_purchases,
+            "best_vendors": update_best_vendors,
+            "inherited_assessments": update_inherited_assessments,
+            "pricing_assessments": update_pricing_assessments,
+        },
     }
 ]
 
-sim_config = config_sim({"N": 2, "T": range(100)})
+sim_config = config_sim({"N": 1, "T": range(50)})
 
 exp = Experiment()
 exp.append_configs(
