@@ -12,6 +12,7 @@ import networkx as nx
 import numpy as np
 import numpy.typing as npt
 import scipy.optimize
+import pickle
 
 from itertools import chain, combinations
 import warnings
@@ -279,10 +280,25 @@ psubs = [
 
 sim_config = config_sim({"N": 1, "T": range(50)})
 
-exp = Experiment()
-exp.append_configs(
-    model_id="first_order_iw",
-    sim_configs=sim_config,
-    initial_state=initial_state,
-    partial_state_update_blocks=psubs,
-)
+
+def exp(startfile: str | None = None):
+    state = initial_state
+    if startfile is not None:
+        file = open(startfile, "rb")
+        df = pickle.load(file)
+        state = {
+            "grid": df[0]["graph"],
+            "best_vendors": {},
+            "inherited_assessments": df[0]["inherited_assessments"],
+            "pricing_assessments": df[0]["pricing_assessments"],
+        }
+
+    xp = Experiment()
+    xp.append_configs(
+        model_id="first_order_iw",
+        sim_configs=sim_config,
+        initial_state=state,
+        partial_state_update_blocks=psubs,
+    )
+
+    return xp

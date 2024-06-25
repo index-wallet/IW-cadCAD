@@ -7,7 +7,7 @@ from sim.config import exp
 
 # exec_context = ExecutionContext(context=ExecutionMode().single_mode)
 exec_context = ExecutionContext()
-run = Executor(exec_context=exec_context, configs=exp.configs)
+run = Executor(exec_context=exec_context, configs=exp().configs)
 
 (system_events, tensor_field, sessions) = run.execute()
 df = pd.DataFrame(system_events)

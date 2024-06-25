@@ -74,7 +74,7 @@ class MainWindow(QMainWindow):
 
     def __timeline_slider__(self) -> QSlider:
         timeline_slider = QSlider(Qt.Orientation.Horizontal)
-        timeline_slider.setRange(0, 50)
+        timeline_slider.setRange(0, len(self.active_sim_data) - 1)
         timeline_slider.setSingleStep(1)
         timeline_slider.valueChanged.connect(self.show_timestep)
 
@@ -113,6 +113,10 @@ class MainWindow(QMainWindow):
         if fileName:
             print(f"Loading sim: {fileName}")
 
+            self.active_sim_file = fileName
+            self.active_sim_data = self.__load_sim_file__(self.active_sim_file)
+            self.timestep = 0
+
     def saveFile(self):
         fileName, _ = QFileDialog.getSaveFileName(
             self,
@@ -122,6 +126,9 @@ class MainWindow(QMainWindow):
         )
         if fileName:
             print(f"Saving fork to: {fileName}")
+
+            file = open(fileName, "wb")
+            pickle.dump(self.active_sim_data.iloc[self.timestep], file)
 
     def __load_sim_file__(self, filepath: str) -> pd.DataFrame:
         file = open(filepath, "rb")
