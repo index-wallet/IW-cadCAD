@@ -115,7 +115,7 @@ class MainWindow(QMainWindow):
 
             self.active_sim_file = fileName
             self.active_sim_data = self.__load_sim_file__(self.active_sim_file)
-            self.timestep = 0
+            self.show_timestep(0)
 
     def saveFile(self):
         fileName, _ = QFileDialog.getSaveFileName(
@@ -133,5 +133,10 @@ class MainWindow(QMainWindow):
     def __load_sim_file__(self, filepath: str) -> pd.DataFrame:
         file = open(filepath, "rb")
         df: pd.DataFrame = pickle.load(file)
+
+        if type(df) is pd.Series:
+            df["timestep"] = 0
+            df = df.to_frame().T
+
         df.set_index("timestep")
         return df
