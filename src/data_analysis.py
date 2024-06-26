@@ -34,7 +34,6 @@ def report(filename: str):
     df: pd.DataFrame = pickle.load(open(filename, "rb"))
     df.set_index("timestep")
 
-    print(df.keys())
     grids = df["grid"]
     currency_one_list, currency_two_list = [], []
 
@@ -53,4 +52,4 @@ def report(filename: str):
     lineplot(currency_two_list, save_dir + "currency_two.png")
 
 
-report("sim_results-1719003096.8714561")
+report("sim_results/brute_force_powerset_search/sim_results-1719003096.8714561")
