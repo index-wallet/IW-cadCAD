@@ -260,6 +260,8 @@ initial_state = {
     "grid": initial_graph,
     "best_vendors": {},
     "inherited_assessments": gen_random_assessments(initial_graph),
+    # NOTE: the price vendors charge is not variable, because they can accomplish the same
+    # thing by changing the magnitude of their pricing assessments and leaving direction the same
     "pricing_assessments": gen_random_assessments(initial_graph),
 }
 

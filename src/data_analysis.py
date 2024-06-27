@@ -46,10 +46,23 @@ def report(filename: str):
             {node: agents[node].wallet[1] for node in agents.keys()}
         )
 
-    scatter(df.loc[0]["pricing_assessments"], save_dir + "initial_assessments.png")
-    scatter(df.iloc[-1]["pricing_assessments"], save_dir + "final_assessments.png")
+    norm_init_asmt = {
+        node: asmt / grids[0].nodes[node]["agent"].price
+        for node, asmt in df.loc[0]["pricing_assessments"].items()
+    }
+    norm_final_asmt = {
+        node: asmt / grids[0].nodes[node]["agent"].price
+        for node, asmt in df.iloc[-1]["pricing_assessments"].items()
+    }
+
+    # NOTE: Normalize here by the price scalar to account for ability to change
+    # price by assessment magnitude
+    scatter(norm_init_asmt, save_dir + "initial_assessments.png")
+    scatter(norm_final_asmt, save_dir + "final_assessments.png")
     lineplot(currency_one_list, save_dir + "currency_one.png")
     lineplot(currency_two_list, save_dir + "currency_two.png")
 
 
-report("sim_results/brute_force_powerset_search/sim_results-1719003096.8714561")
+directory = "sim_results/brute_force_powerset_search"
+for file in os.listdir(directory):
+    report(os.path.join(directory, file))
