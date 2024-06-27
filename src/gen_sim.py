@@ -31,5 +31,5 @@ os.makedirs(save_dir, exist_ok=True)
 now = datetime.now()
 timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
 
-picklefile = open(f"save_dir/{timestamp}.sim", "wb")
+picklefile = open(f"{save_dir}/{timestamp}.sim", "wb")
 pickle.dump(df, picklefile)

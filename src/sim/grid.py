@@ -47,7 +47,12 @@ def gen_econ_network() -> nx.DiGraph:
     for edge in graph.edges:
         if np.random.random() > edge_prob:
             to_remove.append(edge)
+
     graph.remove_edges_from(to_remove)
+    orphan_nodes = [node for node, degree in graph.degree() if degree == 0]
+    for orphan in orphan_nodes:
+        neighbor = (orphan[0] + 1 % grid_size, orphan[1])
+        graph.add_edges_from([(orphan, neighbor)])
 
     return graph
 

@@ -280,7 +280,7 @@ psubs = [
     }
 ]
 
-sim_config = config_sim({"N": 1, "T": range(50)})
+sim_config = config_sim({"N": 1, "T": range(30)})
 
 
 def exp(startfile: str | None = None):
