@@ -4,6 +4,7 @@ from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtGui import QColor, QPalette
 from PyQt6.QtWidgets import (
     QHBoxLayout,
+    QLabel,
     QMainWindow,
     QGridLayout,
     QVBoxLayout,
@@ -12,7 +13,9 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QSlider,
 )
+
 import pandas as pd
+import numpy as np
 
 
 class AgentWidget(QWidget):
@@ -48,15 +51,18 @@ class MainWindow(QMainWindow):
         self.active_sim_file = simfile
         self.active_sim_data = self.__load_sim_file__(self.active_sim_file)
         self.timestep = 0
+        self.avg_asmt = np.array([0.0, 0.0])
 
         # Construct UI pieces
         main_layout = QVBoxLayout()
         self.agent_grid_layout = self.__agent_grid__(
             self.active_sim_data.iloc[0]["grid"]
         )
+        self.avg_asmt_lbl = QLabel(f"Average Valuations: Red, Blue = {self.avg_asmt}")
 
         # Organize UI
         main_layout.addLayout(self.agent_grid_layout)
+        main_layout.addWidget(self.avg_asmt_lbl)
         main_layout.addWidget(self.__timeline_slider__())
         main_layout.addLayout(self.__sim_btns__())
 
@@ -82,6 +88,7 @@ class MainWindow(QMainWindow):
 
     def show_timestep(self, timestep):
         self.timestep = timestep
+        self.avg_asmt = self.calc_average_valuations()
         grid = self.active_sim_data.iloc[timestep]["grid"]
 
         for node, agent in grid.nodes.data("agent"):
@@ -89,6 +96,7 @@ class MainWindow(QMainWindow):
                 *node
             ).widget()
             agent_widget.update_agent(agent)
+        self.avg_asmt_lbl.setText(f"Average Valuations: Red, Blue = {self.avg_asmt}")
 
     def __sim_btns__(self) -> QHBoxLayout:
         open_btn = QPushButton("Open Sim File")
@@ -140,3 +148,13 @@ class MainWindow(QMainWindow):
 
         df.set_index("timestep")
         return df
+
+    def calc_average_valuations(self):
+        asmts = self.active_sim_data.iloc[self.timestep]["pricing_assessments"]
+        valuation = np.array([0.0, 0.0])
+
+        for _, asmt in asmts.items():
+            valuation += asmt
+
+        valuation /= 100
+        return valuation

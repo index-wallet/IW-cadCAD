@@ -46,7 +46,6 @@ def compute_pricing_assessment(
             for node in grid
         }
     print(f"Starting optimization, timestep{state["timestep"]}")
-
     for node in grid.nodes():
         customer_idx = grid[node]
         customers = [grid.nodes[idx]["agent"] for idx in customer_idx]
@@ -191,33 +190,7 @@ def simulate_purchases(
     state: Dict[str, Any],
     _input: Dict[str, Any],
 ) -> Tuple[str, StateVariable]:
-    grid = state["grid"].copy()
-
-    # TODO: I want to iterate this in a random order
-    for node, data in grid.nodes(data=True):
-        customer: Agent = data["agent"]
-
-        # randomly choose vendor to buy from
-        vendor_idx = np.random.choice(len(_input["best_vendors"][node]))
-        vendor_coords = _input["best_vendors"][node][vendor_idx]
-        vendor: Agent = grid.nodes[vendor_coords]["agent"]
-
-        # check if node has enough money and wants product more than cost
-        required_payment_mag: float = vendor.price / np.dot(
-            customer.wallet, _input["pricing_assessments"][vendor_coords]
-        )
-
-        can_pay: bool = bool(required_payment_mag < np.linalg.norm(customer.wallet))
-        wants_product: bool = customer.demand[vendor_coords] > vendor.price * np.dot(
-            customer.wallet, _input["inherited_assessments"][node]
-        ) / np.dot(customer.wallet, _input["pricing_assessments"][vendor_coords])
-
-        if can_pay and wants_product:
-            payment = customer.wallet * required_payment_mag
-            customer.wallet -= payment
-            vendor.wallet += payment
-
-    return ("grid", grid)
+    return ("grid", state["grid"])
 
 
 def update_best_vendors(
