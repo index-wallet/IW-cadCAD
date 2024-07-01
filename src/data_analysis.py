@@ -6,6 +6,7 @@ import pandas as pd
 import matplotlib.axes
 import matplotlib.pyplot as plt
 import networkx as nx
+import numpy as np
 
 
 def scatter(assessments_dict: Dict, savepath: str):
@@ -63,6 +64,6 @@ def report(filename: str):
     lineplot(currency_two_list, save_dir + "currency_two.png")
 
 
-directory = "sim_results/99f8fb74a11cbfcf345671cf823f6af5ef1700c9"
+directory = "sim_results/suboptimal_assessment_setting"
 for file in os.listdir(directory):
     report(os.path.join(directory, file))

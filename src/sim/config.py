@@ -12,6 +12,7 @@ import networkx as nx
 import numpy as np
 import numpy.typing as npt
 import scipy.optimize
+import pandas as pd
 import pickle
 
 from itertools import chain, combinations
@@ -261,11 +262,17 @@ def exp(startfile: str | None = None):
     if startfile is not None:
         file = open(startfile, "rb")
         df = pickle.load(file)
+
+        if type(df) is pd.Series:
+            df["timestep"] = 0
+            df = df.to_frame().T
+
+        print(df.keys())
         state = {
-            "grid": df[0]["graph"],
+            "grid": df.iloc[0]["grid"],
             "best_vendors": {},
-            "inherited_assessments": df[0]["inherited_assessments"],
-            "pricing_assessments": df[0]["pricing_assessments"],
+            "inherited_assessments": df.iloc[0]["inherited_assessments"],
+            "pricing_assessments": df.iloc[0]["pricing_assessments"],
         }
 
     xp = Experiment()
