@@ -17,6 +17,7 @@ def scatter(assessments_dict: Dict, savepath: str):
     plt.scatter(x, y)
     plt.gca().set_title("Pricing Assessments")
     plt.savefig(savepath)
+    plt.close()
 
 
 def lineplot(vals: List[Dict], savepath: str):
@@ -26,7 +27,11 @@ def lineplot(vals: List[Dict], savepath: str):
     ax.set_title("Wealth over Time")
     ax.set_xlabel("Timestep")
     ax.set_ylabel("Currency")
-    ax.get_figure().savefig(savepath)
+
+    fig = ax.get_figure()
+    if fig is not None:
+        fig.savefig(savepath)
+    plt.close()
 
 
 def report(filename: str):
@@ -64,6 +69,6 @@ def report(filename: str):
     lineplot(currency_two_list, save_dir + "currency_two.png")
 
 
-directory = "sim_results/suboptimal_assessment_setting"
+directory = "sim_results/99f8fb74a11cbfcf345671cf823f6af5ef1700c9"
 for file in os.listdir(directory):
     report(os.path.join(directory, file))

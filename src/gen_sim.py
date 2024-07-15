@@ -7,9 +7,10 @@ import os, subprocess
 from sim.config import exp
 
 os.chdir("/home/bgould/dev/index-wallets/IW-cadCAD")
-conf_file: str = (
+conf_file: str | None = (
     "sim_results/99f8fb74a11cbfcf345671cf823f6af5ef1700c9/2024-06-27 14:32:14.sim"
 )
+conf_file = None
 
 exec_context = ExecutionContext(context=ExecutionMode().single_mode)
 # exec_context = ExecutionContext()
@@ -39,6 +40,8 @@ os.makedirs(save_dir, exist_ok=True)
 now = datetime.now()
 timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
 
-# picklefile = open(f"{save_dir}/{timestamp}.sim", "wb")
-picklefile = open(conf_file.replace(".sim", ".sim2"), "wb")
+picklefile = open(f"{save_dir}/{timestamp}.sim", "wb")
+if conf_file is not None:
+    picklefile = open(conf_file.replace(".sim", ".sim2"), "wb")
+
 pickle.dump(df, picklefile)
