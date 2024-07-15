@@ -22,6 +22,7 @@ class Agent:
         self.wallet: npt.NDArray[np.float64] = np.random.rand(num_currencies)
 
         self.price: float = np.random.random() * price_range[1] + price_range[0]
+        self.prod_cost = self.price / 10
         # HACK: this feels hacky, but I can't use agents as keys if I want to construct them all at the same time
         self.demand: Dict[Tuple[int, int], float] = {
             neighbor: np.random.random() * demand_range[1] + demand_range[0]

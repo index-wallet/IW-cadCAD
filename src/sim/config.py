@@ -65,19 +65,29 @@ def compute_pricing_assessment(
                 profit: float = 0
 
                 for customer_idx, customer in customer_combo:
-                    profit += (
-                        np.dot(customer.wallet, state["inherited_assessments"][node])
-                        / np.dot(customer.wallet, state["pricing_assessments"][node])
-                        / (1 + len(best_vendors[customer_idx]))
-                    )
+                    pricing_assessments = state["pricing_assessments"][node]
+                    if np.linalg.norm(pricing_assessments) == 0:
+                        customer_revenue = 0
+                    else:
+                        customer_revenue = (
+                            np.dot(
+                                customer.wallet, state["inherited_assessments"][node]
+                            )
+                            / np.dot(customer.wallet, pricing_assessments)
+                            / (1 + len(best_vendors[customer_idx]))
+                        )
+                        profit -= me.prod_cost
+
+                    profit += me.price * customer_revenue
 
                 # negative here b/c scipy only minimizes
-                return -profit * me.price
+                return -profit
 
             return profit_func
 
         max_profit = 0
-        best_assessment = np.array([])
+        best_assessment = np.zeros_like(me.wallet)
+        # best_combo = []
 
         # Find optimal assessment for every combo
         for combo in customer_combos:
@@ -113,8 +123,12 @@ def compute_pricing_assessment(
             if profit > max_profit:
                 max_profit = profit
                 best_assessment = assessment
+                # best_combo = combo
 
         pricing_assessments[node] = best_assessment
+        # print(
+        #     f"Node {node} makes profit {max_profit} by selling to {len(best_combo)} neighbors"
+        # )
 
     return {"pricing_assessments": pricing_assessments}
 
@@ -191,7 +205,41 @@ def simulate_purchases(
     state: Dict[str, Any],
     _input: Dict[str, Any],
 ) -> Tuple[str, StateVariable]:
-    return ("grid", state["grid"])
+    grid = state["grid"].copy()
+
+    # TODO: I want to iterate this in a random order
+    for node, data in grid.nodes(data=True):
+        customer: Agent = data["agent"]
+
+        # randomly choose vendor to buy from
+        vendor_idx = np.random.choice(len(_input["best_vendors"][node]))
+        vendor_coords = _input["best_vendors"][node][vendor_idx]
+        vendor: Agent = grid.nodes[vendor_coords]["agent"]
+
+        # check if node has enough money and wants product more than cost
+        denom = np.dot(customer.wallet, _input["pricing_assessments"][vendor_coords])
+        required_payment_mag = 0
+        effective_price = 0
+        if denom == 0:
+            required_payment_mag = np.inf
+            effective_price = np.inf
+        else:
+            required_payment_mag: float = vendor.price / denom
+            effective_price = (
+                vendor.price
+                * np.dot(customer.wallet, _input["inherited_assessments"][node])
+                / denom
+            )
+
+        can_pay: bool = bool(required_payment_mag < np.linalg.norm(customer.wallet))
+        wants_product: bool = customer.demand[vendor_coords] > effective_price
+
+        if can_pay and wants_product:
+            payment = customer.wallet * required_payment_mag
+            customer.wallet -= payment
+            vendor.wallet += payment
+
+    return ("grid", grid)
 
 
 def update_best_vendors(
