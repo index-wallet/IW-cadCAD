@@ -33,11 +33,11 @@ class AgentWidget(QWidget):
         self.setPalette(palette)
 
     def __calc_color__(self) -> Tuple[int, int, int]:
-        [currency_one, currency_two] = self.agent.wallet
-        sat_one = currency_one / (currency_one + currency_two)
-        sat_two = currency_two / (currency_one + currency_two)
+        sum: float = np.sum(self.agent.wallet)
+        ratios = [currency / sum for currency in self.agent.wallet]
 
-        return (int(255 * sat_one), 0, int(255 * sat_two))
+        # TODO: display this in a more principled manner
+        return (int(255 * ratios[0]), 0, int(255 * ratios[-1]))
 
 
 # Subclass QMainWindow to customize your application's main window
