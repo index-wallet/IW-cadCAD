@@ -92,13 +92,16 @@ def compute_pricing_assessment(
 
             return profit_func
 
+        # Worst case assessment: we sell at marginal cost. Note that this is not
+        # the only assessment that induces 0 profit, but it is possibly the most logical one
+        best_assessment = me.price / me.prod_cost * state["inherited_assessments"][node]
         max_profit = 0
-        best_assessment = np.zeros_like(me.wallet)
 
         # Find optimal assessment for every combo
         for combo in customer_combos:
             objective = get_profit_func(list(combo))
 
+            # Ensure prices are low enough to keep every agent in combo as buyer
             constraint = scipy.optimize.LinearConstraint(
                 np.array([customer.wallet for _, customer in combo]),
                 lb=np.array(
@@ -115,6 +118,7 @@ def compute_pricing_assessment(
                 ),
             )
 
+            # Find profit maximizing assessment for this combo
             result = scipy.optimize.minimize(
                 objective,
                 state["inherited_assessments"][node],
@@ -125,11 +129,10 @@ def compute_pricing_assessment(
             profit: float = -result.fun
             assessment: npt.NDArray = result.x
 
-            # Search optimal profit over every combo
+            # Save running optimal profit over every combo
             if profit > max_profit:
                 max_profit = profit
                 best_assessment = assessment
-                # best_combo = combo
 
         # Save optimal assessment for this node
         pricing_assessments[node] = best_assessment
