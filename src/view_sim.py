@@ -7,7 +7,7 @@ from ui.window import MainWindow
 
 app = QApplication(sys.argv)
 window = MainWindow(
-    "sim_results/814cc652373295dc0accae4aafa62275fadd7362/2024-06-26 15:38:59.sim"
+    "sim_results/7bfa8a0eb2f192a112d067518fd71f78e7cf2f57/2024-07-17 17:24:34.sim"
 )
 window.show()
 

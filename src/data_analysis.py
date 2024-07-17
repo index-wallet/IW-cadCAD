@@ -8,10 +8,13 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 
+from sim.grid import num_currencies
+
 
 def scatter(assessments_dict: Dict, savepath: str):
+    # TODO: if I have num_currencies != 1 or 2, this gets weird
     x = [val[0] for val in assessments_dict.values()]
-    y = [val[1] for val in assessments_dict.values()]
+    y = [val[-1] for val in assessments_dict.values()]
 
     plt.figure()
     plt.scatter(x, y)
@@ -41,16 +44,14 @@ def report(filename: str):
     df.set_index("timestep")
 
     grids = df["grid"]
-    currency_one_list, currency_two_list = [], []
+    currency_lists = [[] for _ in range(num_currencies)]
 
     for grid in grids:
         agents = nx.get_node_attributes(grid, "agent")
-        currency_one_list.append(
-            {node: agents[node].wallet[0] for node in agents.keys()}
-        )
-        currency_two_list.append(
-            {node: agents[node].wallet[1] for node in agents.keys()}
-        )
+        for i in range(num_currencies):
+            currency_lists[i].append(
+                {node: agents[node].wallet[i] for node in agents.keys()}
+            )
 
     norm_init_asmt = {
         node: asmt / grids[0].nodes[node]["agent"].price
@@ -65,10 +66,11 @@ def report(filename: str):
     # price by assessment magnitude
     scatter(norm_init_asmt, save_dir + "initial_assessments.png")
     scatter(norm_final_asmt, save_dir + "final_assessments.png")
-    lineplot(currency_one_list, save_dir + "currency_one.png")
-    lineplot(currency_two_list, save_dir + "currency_two.png")
+
+    for i in range(num_currencies):
+        lineplot(currency_lists[i], save_dir + f"currency_{i+1}.png")
 
 
-directory = "sim_results/99f8fb74a11cbfcf345671cf823f6af5ef1700c9"
+directory = "sim_results/7bfa8a0eb2f192a112d067518fd71f78e7cf2f57"
 for file in os.listdir(directory):
     report(os.path.join(directory, file))

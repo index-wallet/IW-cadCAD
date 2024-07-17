@@ -9,7 +9,7 @@ edge_prob: float = 0.8
 seed: np.random.RandomState = np.random.RandomState(0)
 wraparound: bool = True
 
-num_currencies: int = 1
+num_currencies: int = 2
 
 # Each of these ranges is [min, width] for a uniform sample
 demand_range: List[float] = [0.5, 1]
