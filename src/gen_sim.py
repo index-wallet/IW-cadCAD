@@ -2,7 +2,8 @@ from cadCAD.engine import ExecutionContext, ExecutionMode, Executor
 import pandas as pd
 import pickle
 from datetime import datetime
-import os, subprocess
+import os
+import subprocess
 
 from sim.config import exp
 

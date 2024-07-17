@@ -29,8 +29,12 @@ class Agent:
             for neighbor in neighbors
         }
 
+        # scalar multiplier for public good benefit
+        # worst case: no one gets any utility from donations
+        self.public_good_util_scales = np.zeros(num_currencies)
+
     def __str__(self) -> str:
-        return f"Wallet: {self.wallet}\nPrice: {self.price}\nDemand: {self.demand}\nInherited Valuation: {self.inherited_assessment}\nPricing Valuation:{self.pricing_assessment}"
+        return f"Wallet: {self.wallet}\nPrice: {self.price}\nDemand: {self.demand}"
 
 
 def gen_econ_network() -> nx.DiGraph:
@@ -63,3 +67,28 @@ def gen_random_assessments(graph: nx.DiGraph):
         node: np.random.rand(num_currencies) * valuation_range[1] + valuation_range[0]
         for node in graph.nodes
     }
+
+
+def public_good_util(previous_donations: float, new_donations: float) -> float:
+    return new_donations * 0.5 / np.log(previous_donations / 10 + 1.1)
+
+
+def donation_currency_reward(
+    pricing_assessments: Dict[Tuple[int, int], npt.NDArray],
+    good_index: int,
+    previous_donations: float,
+    new_donations: float,
+) -> float:
+    good_currency_asmts: npt.NDArray = np.array(
+        [asmt[good_index] for asmt in pricing_assessments.values()]
+    )
+
+    # Weight random choice towards higher valuations
+    # TODO: Is this really what we want? It actually skews towards giving less currency back
+    # HACK: We could have problems here if we choose a 0 ref_asmt. Theoretically shouldn't happen
+    ref_asmt = np.random.choice(
+        good_currency_asmts,
+        p=(good_currency_asmts / np.sum(good_currency_asmts)),
+    )
+
+    return public_good_util(previous_donations, new_donations) / ref_asmt
