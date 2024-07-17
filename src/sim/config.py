@@ -37,8 +37,9 @@ def compute_pricing_assessment(
     state: Dict[str, Any],
 ) -> PolicyOutput:
 
-    grid: nx.DiGraph = state["grid"]
     pricing_assessments: Dict[Tuple[int, int], npt.NDArray] = {}
+    grid: nx.DiGraph = state["grid"]
+
     # Fill if needed (on first iteration)
     best_vendors = state["best_vendors"]
     if best_vendors == {}:
@@ -46,8 +47,14 @@ def compute_pricing_assessment(
             node: get_best_vendors(grid, node, state["pricing_assessments"])
             for node in grid
         }
+
     print(f"Starting optimization, timestep{state["timestep"]}")
-    for node in grid.nodes():
+
+    # Shuffle to ensure random order
+    nodes = [node for node in grid.nodes()]
+    np.random.shuffle(nodes)
+
+    for node in nodes:
         customer_idx = grid[node]
         customers = [grid.nodes[idx]["agent"] for idx in customer_idx]
         customer_combos = powerset(
@@ -87,7 +94,6 @@ def compute_pricing_assessment(
 
         max_profit = 0
         best_assessment = np.zeros_like(me.wallet)
-        # best_combo = []
 
         # Find optimal assessment for every combo
         for combo in customer_combos:
@@ -125,10 +131,8 @@ def compute_pricing_assessment(
                 best_assessment = assessment
                 # best_combo = combo
 
+        # Save optimal assessment for this node
         pricing_assessments[node] = best_assessment
-        # print(
-        #     f"Node {node} makes profit {max_profit} by selling to {len(best_combo)} neighbors"
-        # )
 
     return {"pricing_assessments": pricing_assessments}
 
@@ -144,7 +148,11 @@ def compute_inherited_assessment(
     inherited_assessments: Dict[Tuple[int, int], npt.NDArray[np.float64]] = {}
     best_vendors: Dict[Tuple[int, int], List[Tuple[int, int]]] = {}
 
-    for node in grid.nodes():
+    # Shuffle to ensure random order
+    nodes = [node for node in grid.nodes()]
+    np.random.shuffle(nodes)
+
+    for node in nodes:
         # Find best vendor among neighbors
         nodes_best_vendors = get_best_vendors(grid, node, state["pricing_assessments"])
 
@@ -207,8 +215,11 @@ def simulate_purchases(
 ) -> Tuple[str, StateVariable]:
     grid = state["grid"].copy()
 
-    # TODO: I want to iterate this in a random order
-    for node, data in grid.nodes(data=True):
+    # Shuffle to ensure random iteration order
+    node_data = [(node, data) for node, data in grid.nodes(data=True)]
+    np.random.shuffle(node_data)
+
+    for node, data in node_data:
         customer: Agent = data["agent"]
 
         # randomly choose vendor to buy from
