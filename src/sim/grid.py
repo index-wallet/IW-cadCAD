@@ -156,6 +156,5 @@ def donation_currency_reward(
     )
 
     # Currently, we use a hyperbolic donation reward scaling function
-    # TODO: parameterize this 0.5 here. Smaller -> bigger initial rewards
     # TODO: mix currency reward between original donation and good's currency
     return new_donation_util / (prev_donation_util + 1 / initial_donation_reward_amount)

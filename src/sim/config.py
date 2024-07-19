@@ -27,7 +27,7 @@ from sim.grid import (
     donation_currency_reward,
     num_currencies,
 )
-from sim.params import eps
+from sim.params import eps, donation_reward_mix
 
 warnings.filterwarnings(
     "ignore", message="delta_grad == 0.0. Check if the approximated function is linear."
@@ -242,7 +242,7 @@ def compute_donations(
             donation_benefit_fn,
             np.zeros(num_currencies),
             constraints=constraint,
-            bounds=[(0, None) for _ in range(num_currencies)],
+            bounds=[(0, 1 - donation_reward_mix) for _ in range(num_currencies)],
         )
 
         # Add donations from this agent to total

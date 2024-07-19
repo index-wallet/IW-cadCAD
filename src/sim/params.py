@@ -13,4 +13,9 @@ price_range: List[float] = [0.1, 0.9]
 
 eps: float = 10**-6
 
-initial_donation_reward_amount = 2
+# Reward size for 1 unit of donation utility, before any donations have been made
+initial_donation_reward_amount: float = 2
+# Fraction of a currency reward that is returned in the original wallet
+# This is equivalent to preventing agents from donating any more than 1-donation_reward_mix
+# of their wallet to any individual good, which is how I implement this
+donation_reward_mix: float = 0.9
