@@ -27,11 +27,11 @@ from sim.grid import (
     donation_currency_reward,
     num_currencies,
 )
+from sim.params import eps
 
 warnings.filterwarnings(
     "ignore", message="delta_grad == 0.0. Check if the approximated function is linear."
 )
-eps: float = 10**-6
 
 # ============================================================
 # Policy functions

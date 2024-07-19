@@ -4,16 +4,16 @@ import networkx as nx
 import numpy as np
 import numpy.typing as npt
 
-grid_size: int = 10
-edge_prob: float = 0.8
-wraparound: bool = True
-
-num_currencies: int = 2
-
-# Each of these ranges is [min, width] for a uniform sample
-demand_range: List[float] = [0.5, 1]
-valuation_range: List[float] = [0.5, 1]
-price_range: List[float] = [0.1, 0.9]
+from sim.params import (
+    grid_size,
+    edge_prob,
+    wraparound,
+    num_currencies,
+    demand_range,
+    valuation_range,
+    price_range,
+    initial_donation_reward_amount,
+)
 
 
 class Agent:
@@ -158,4 +158,4 @@ def donation_currency_reward(
     # Currently, we use a hyperbolic donation reward scaling function
     # TODO: parameterize this 0.5 here. Smaller -> bigger initial rewards
     # TODO: mix currency reward between original donation and good's currency
-    return new_donation_util / (prev_donation_util + 0.5)
+    return new_donation_util / (prev_donation_util + 1 / initial_donation_reward_amount)
