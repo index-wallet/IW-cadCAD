@@ -16,7 +16,10 @@ def scatter(assessments_dict: Dict, savepath: str):
 
     plt.figure()
     plt.scatter(x, y)
-    plt.gca().set_title("Pricing Assessments")
+    ax = plt.gca()
+    ax.set_title("Pricing Assessments")
+    ax.set_xscale("log")
+    ax.set_yscale("log")
     plt.savefig(savepath)
     plt.close()
 
@@ -28,6 +31,7 @@ def lineplot(vals: List[Dict], savepath: str):
     ax.set_title("Wealth over Time")
     ax.set_xlabel("Timestep")
     ax.set_ylabel("Currency")
+    ax.set_yscale("log")
 
     fig = ax.get_figure()
     if fig is not None:
@@ -71,6 +75,6 @@ def report(filename: str):
         lineplot(currency_lists[i], save_dir + f"currency_{i+1}.png")
 
 
-directory = "sim_results/054f37538f49a946765a2d04dfe7999d47ea199e"
+directory = "sim_results/042d5539db3f0f6994f46681190e5ee48a2de812"
 for file in os.listdir(directory):
     report(os.path.join(directory, file))
