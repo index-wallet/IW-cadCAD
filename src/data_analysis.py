@@ -8,8 +8,6 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 
-from sim.grid import num_currencies
-
 
 def scatter(assessments_dict: Dict, savepath: str):
     # TODO: if I have num_currencies != 1 or 2, this gets weird
@@ -43,6 +41,8 @@ def report(filename: str):
     df: pd.DataFrame = pickle.load(open(filename, "rb"))
     df.set_index("timestep")
 
+    num_currencies = len(df["grid"].iloc[0].nodes[(0, 0)]["agent"].wallet)
+
     grids = df["grid"]
     currency_lists = [[] for _ in range(num_currencies)]
 
@@ -71,6 +71,6 @@ def report(filename: str):
         lineplot(currency_lists[i], save_dir + f"currency_{i+1}.png")
 
 
-directory = "sim_results/7bfa8a0eb2f192a112d067518fd71f78e7cf2f57"
+directory = "sim_results/054f37538f49a946765a2d04dfe7999d47ea199e"
 for file in os.listdir(directory):
     report(os.path.join(directory, file))

@@ -6,7 +6,6 @@ import numpy.typing as npt
 
 grid_size: int = 10
 edge_prob: float = 0.8
-seed: np.random.RandomState = np.random.RandomState(0)
 wraparound: bool = True
 
 num_currencies: int = 2
@@ -69,26 +68,94 @@ def gen_random_assessments(graph: nx.DiGraph):
     }
 
 
-def public_good_util(previous_donations: float, new_donations: float) -> float:
-    return new_donations * 0.5 / np.log(previous_donations / 10 + 1.1)
+def find_public_good_owners(graph: nx.DiGraph) -> List[Tuple[int, int]]:
+    """
+    Find the node in the graph with the highest benefit scalar for each good.
+    We assume that these nodes represent the owner of the company working on
+    that good, and use their assessments to value donations.
+
+    Args:
+        graph: The network of agents in the sim
+
+    Returns: A list of the coordinates of the owners of each good, in the same
+    order as simulation currencies
+    """
+
+    data = graph.nodes.data("agent")
+    util_scales = np.array([agent.public_good_util_scales for _, agent in data])
+    node_coords = [node for node, _ in data]
+    owner_idx = np.argmax(util_scales, axis=0)
+    owner_coords = [node_coords[i] for i in owner_idx]
+
+    return owner_coords
+
+
+def public_good_util(
+    previous_donations: npt.NDArray,
+    new_donations: npt.NDArray,
+    util_assessments: npt.NDArray,
+) -> npt.NDArray:
+    """
+    Calculates the utility received by agents through a public good,
+    given the amount of donations it has received. Utility increases
+    sub-linearly with total donations.
+
+    Args:
+        previous_donations: 2D array, giving the wallet of previous donations for each good
+        new_donations: 2D array, for each good, the amount of each currency donated to it by this agent this timestep
+        util_assessments: array of the value of each currency to the owner of the public good
+
+    Returns: Utility caused by public good at current level of donation
+    """
+    # convert donations to benefit for public good owner
+    prev_donation_util = np.array(
+        [
+            np.dot(donation, util_asmt)
+            for donation, util_asmt in zip(previous_donations, util_assessments)
+        ]
+    )
+    new_donation_util = np.array(
+        [
+            np.dot(donation, util_asmt)
+            for donation, util_asmt in zip(new_donations, util_assessments)
+        ]
+    )
+
+    # Currently, we assume that the success of a good is logarithmic in donation size
+    return np.log(prev_donation_util + new_donation_util + 1)
 
 
 def donation_currency_reward(
-    pricing_assessments: Dict[Tuple[int, int], npt.NDArray],
-    good_index: int,
-    previous_donations: float,
-    new_donations: float,
-) -> float:
-    good_currency_asmts: npt.NDArray = np.array(
-        [asmt[good_index] for asmt in pricing_assessments.values()]
+    previous_donations: npt.NDArray,
+    new_donations: npt.NDArray,
+    util_assessments: npt.NDArray,
+) -> npt.NDArray:
+    """
+    Gets the amount of currency rewarded in return for the given donation.
+    Reward value decreases with total donations made
+
+    Args:
+        previous_donations: 2D array, giving the wallet of previous donations for each good
+        new_donations: 2D array, for each good, the amount of each currency donated to it by this agent this timestep
+        util_assessments: array of the value of each currency to the owner of the public good
+
+    Returns: Array giving the size of the reward from each good caused by this donation
+    """
+    # convert donations to benefit for public good owner
+    prev_donation_util = np.array(
+        [
+            np.dot(donation, util_asmt)
+            for donation, util_asmt in zip(previous_donations, util_assessments)
+        ]
+    )
+    new_donation_util = np.array(
+        [
+            np.dot(donation, util_asmt)
+            for donation, util_asmt in zip(new_donations, util_assessments)
+        ]
     )
 
-    # Weight random choice towards higher valuations
-    # TODO: Is this really what we want? It actually skews towards giving less currency back
-    # HACK: We could have problems here if we choose a 0 ref_asmt. Theoretically shouldn't happen
-    ref_asmt = np.random.choice(
-        good_currency_asmts,
-        p=(good_currency_asmts / np.sum(good_currency_asmts)),
-    )
-
-    return public_good_util(previous_donations, new_donations) / ref_asmt
+    # Currently, we use a hyperbolic donation reward scaling function
+    # TODO: parameterize this 0.5 here. Smaller -> bigger initial rewards
+    # TODO: mix currency reward between original donation and good's currency
+    return new_donation_util / (prev_donation_util + 0.5)

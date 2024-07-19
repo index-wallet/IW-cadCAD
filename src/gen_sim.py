@@ -7,14 +7,16 @@ import subprocess
 
 from sim.config import exp
 
-os.chdir("/home/bgould/dev/index-wallets/IW-cadCAD")
 conf_file: str | None = (
     "sim_results/99f8fb74a11cbfcf345671cf823f6af5ef1700c9/2024-06-27 14:32:14.sim"
 )
 conf_file = None
 
+# switch to single threaded mode here for debugging
 exec_context = ExecutionContext(context=ExecutionMode().single_mode)
+os.chdir("/home/bgould/dev/index-wallets/IW-cadCAD")
 # exec_context = ExecutionContext()
+
 run = Executor(
     exec_context=exec_context,
     configs=exp(conf_file).configs,

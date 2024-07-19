@@ -18,7 +18,15 @@ import pickle
 from itertools import chain, combinations
 import warnings
 
-from sim.grid import Agent, gen_econ_network, gen_random_assessments
+from sim.grid import (
+    Agent,
+    find_public_good_owners,
+    gen_econ_network,
+    gen_random_assessments,
+    public_good_util,
+    donation_currency_reward,
+    num_currencies,
+)
 
 warnings.filterwarnings(
     "ignore", message="delta_grad == 0.0. Check if the approximated function is linear."
@@ -172,6 +180,79 @@ def compute_inherited_assessment(
     }
 
 
+def compute_donations(
+    _params: Parameters,
+    substep: Substep,
+    state_history: StateHistory,
+    state: Dict[str, Any],
+) -> PolicyOutput:
+
+    grid = state["grid"]
+    node_data = [(node, data) for node, data in grid.nodes(data=True)]
+    np.random.shuffle(node_data)
+
+    grids_donations: Dict[Tuple[int, int], npt.NDArray] = {}
+
+    # Calculate owner for each public good to scale donation value
+    donation_assessments = np.array(
+        [state["inherited_assessments"][idx] for idx in state["public_good_owners"]]
+    )
+
+    # Calculate optimal donation for each agent
+    for node, data in node_data:
+        agent: Agent = data["agent"]
+
+        def donation_benefit_fn(donation_fractions: npt.NDArray) -> float:
+            """
+            Measures the total utility gained by an agent for the given donation
+
+            Args:
+                donation_fractions: List of the fraction of agent wallet being donated to each cause
+
+            Returns: social benefit of donation + value of currency reward - value of donation
+            """
+            node_donations = np.array(
+                [agent.wallet * frac for frac in donation_fractions]
+            )
+
+            social_good_benefit = np.dot(
+                agent.public_good_util_scales,
+                public_good_util(
+                    state["total_donations"], node_donations, donation_assessments
+                ),
+            )
+            currency_reward = donation_currency_reward(
+                state["total_donations"], node_donations, donation_assessments
+            )
+            reward_value = np.dot(currency_reward, state["inherited_assessments"][node])
+
+            donation_value = np.dot(
+                np.sum(donation_fractions) * agent.wallet,
+                state["inherited_assessments"][node],
+            )
+
+            # negative here b/c/ scipy only minimizes
+            return -social_good_benefit - reward_value + donation_value
+
+        # Optimize donation benefit function
+        constraint = scipy.optimize.LinearConstraint(
+            np.ones(num_currencies), ub=1
+        )  # donate non-negative value, less than total wallet
+        result = scipy.optimize.minimize(
+            donation_benefit_fn,
+            np.zeros(num_currencies),
+            constraints=constraint,
+            bounds=[(0, None) for _ in range(num_currencies)],
+        )
+
+        # Add donations from this agent to total
+        donation_frac = result.x
+        node_donations = np.array([agent.wallet * frac for frac in donation_frac])
+        grids_donations[node] = node_donations
+
+    return {"donations": grids_donations}
+
+
 def get_best_vendors(
     grid: nx.DiGraph, node, pricing_assessments
 ) -> List[Tuple[int, int]]:
@@ -286,6 +367,52 @@ def update_pricing_assessments(
     return ("pricing_assessments", _input["pricing_assessments"])
 
 
+def update_public_good_owners(
+    _params: Parameters,
+    substep: Substep,
+    state_history: StateHistory,
+    state: Dict[str, Any],
+    _input: PolicyOutput,
+) -> Tuple[str, StateVariable]:
+    return ("public_good_owners", state["public_good_owners"])
+
+
+def update_total_donations(
+    _params: Parameters,
+    substep: Substep,
+    state_history: StateHistory,
+    state: Dict[str, Any],
+    _input: Dict[str, Any],
+) -> Tuple[str, StateVariable]:
+    all_new_donations = sum(_input["donations"].values())
+    return ("total_donations", state["total_donations"] + all_new_donations)
+
+
+def make_donations(
+    _params: Parameters,
+    substep: Substep,
+    state_history: StateHistory,
+    state: Dict[str, Any],
+    _input: Dict[str, Any],
+) -> Tuple[str, StateVariable]:
+    grid = state["grid"].copy()
+
+    for node, donation in _input["donations"].items():
+        agent: Agent = grid.nodes[node]["agent"]
+
+        donation_assessments = np.array(
+            [state["inherited_assessments"][idx] for idx in state["public_good_owners"]]
+        )
+        currency_reward = donation_currency_reward(
+            state["total_donations"], donation, donation_assessments
+        )
+
+        agent.wallet -= np.sum(donation, axis=0)
+        agent.wallet += currency_reward
+
+    return ("grid", grid)
+
+
 # ============================================================
 # Sim configuration
 # ============================================================
@@ -299,9 +426,21 @@ initial_state = {
     # NOTE: the price vendors charge is not variable, because they can accomplish the same
     # thing by changing the magnitude of their pricing assessments and leaving direction the same
     "pricing_assessments": gen_random_assessments(initial_graph),
+    "total_donations": np.zeros((num_currencies, num_currencies)),
+    "public_good_owners": find_public_good_owners(initial_graph),
 }
 
 psubs = [
+    {
+        "policies": {
+            "donations": compute_donations,
+        },
+        "variables": {
+            "public_good_owners": update_public_good_owners,
+            "total_donations": update_total_donations,
+            "grid": make_donations,
+        },
+    },
     {
         "policies": {
             "pub_assessment": compute_pricing_assessment,
@@ -313,7 +452,7 @@ psubs = [
             "inherited_assessments": update_inherited_assessments,
             "pricing_assessments": update_pricing_assessments,
         },
-    }
+    },
 ]
 
 sim_config = config_sim({"N": 1, "T": range(30)})
@@ -329,7 +468,6 @@ def exp(startfile: str | None = None):
             df["timestep"] = 0
             df = df.to_frame().T
 
-        print(df.keys())
         state = {
             "grid": df.iloc[0]["grid"],
             "best_vendors": {},
