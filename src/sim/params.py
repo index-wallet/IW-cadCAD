@@ -12,6 +12,7 @@ valuation_range: List[float] = [0.5, 1]
 price_range: List[float] = [0.1, 0.9]
 
 eps: float = 10**-6
+sim_timesteps = 30
 
 # Reward size for 1 unit of donation utility, before any donations have been made
 initial_donation_reward_amount: float = 2

@@ -27,7 +27,7 @@ from sim.grid import (
     donation_currency_reward,
     num_currencies,
 )
-from sim.params import eps, donation_reward_mix
+from sim.params import eps, donation_reward_mix, sim_timesteps
 
 warnings.filterwarnings(
     "ignore", message="delta_grad == 0.0. Check if the approximated function is linear."
@@ -455,7 +455,7 @@ psubs = [
     },
 ]
 
-sim_config = config_sim({"N": 1, "T": range(30)})
+sim_config = config_sim({"N": 1, "T": range(sim_timesteps)})
 
 
 def exp(startfile: str | None = None):

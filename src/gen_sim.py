@@ -14,7 +14,7 @@ conf_file = None
 
 # switch to single threaded mode here for debugging
 exec_context = ExecutionContext(context=ExecutionMode().single_mode)
-os.chdir("/home/bgould/dev/index-wallets/IW-cadCAD")
+# os.chdir("/home/bgould/dev/index-wallets/IW-cadCAD")
 # exec_context = ExecutionContext()
 
 run = Executor(
@@ -45,6 +45,6 @@ timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
 
 picklefile = open(f"{save_dir}/{timestamp}.sim", "wb")
 if conf_file is not None:
-    picklefile = open(conf_file.replace(".sim", ".sim2"), "wb")
+    picklefile = open(conf_file.replace(".sim", ".sim-fork"), "wb")
 
 pickle.dump(df, picklefile)
