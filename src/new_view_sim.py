@@ -77,8 +77,21 @@ def create_interactive_time_evolving_network(networks, df):
     """ Create an interactive plotly figure showing the time evolving networks """
     frames = []
     
-    fig = make_subplots(rows=1, cols=2, column_widths=[0.7, 0.3], 
-                        specs=[[{"type": "scatter"}, {"type": "table"}]])
+    fig = make_subplots(rows=2, cols=2, 
+                        column_widths=[0.7, 0.3],
+                        row_heights=[0.6, 0.4],
+                        specs=[[{"type": "scatter", "rowspan": 2}, {"type": "table"}],
+                               [None, {"type": "scatter"}]])
+    
+    wallet_data = {}
+    for t, network in enumerate(networks):
+        for node in network.nodes():
+            if node not in wallet_data:
+                wallet_data[node] = []
+            wallet_data[node].append(sum(network.nodes[node]['wallet']))
+    
+    min_wallet = min(min(values) for values in wallet_data.values())
+    max_wallet = max(max(values) for values in wallet_data.values())
     
     for t, G in enumerate(networks):
         pos = {node: node for node in G.nodes()}
@@ -141,8 +154,20 @@ def create_interactive_time_evolving_network(networks, df):
             visible=True
         )
         
+        wallet_traces = []
+        for node, wallet_values in wallet_data.items():
+            wallet_trace = go.Scatter(
+                x=list(range(t+1)),
+                y=wallet_values,
+                mode='lines',
+                name=f'Node {node}',
+                line=dict(width=1),
+                showlegend=False
+            )
+            wallet_traces.append(wallet_trace)
+        
         frames.append(go.Frame(
-            data=[edge_trace, node_trace, table_trace],
+            data=[edge_trace, node_trace, table_trace] + wallet_traces,
             name=f't{t}',
             layout=go.Layout(
                 title=f"Average Valuations: Red, Blue = {avg_asmt}"
@@ -152,11 +177,14 @@ def create_interactive_time_evolving_network(networks, df):
     fig.add_trace(frames[0].data[0], row=1, col=1)
     fig.add_trace(frames[0].data[1], row=1, col=1)
     fig.add_trace(frames[0].data[2], row=1, col=2)
+    for wallet_trace in frames[0].data[3:]:
+        fig.add_trace(wallet_trace, row=2, col=2)
 
     fig.update_layout(
         title=f"Average Valuations: Red, Blue = {calc_average_valuations(df.iloc[0])}",
         showlegend=False,
         hovermode='closest',
+        height=900,
         updatemenus=[dict(
             type="buttons",
             buttons=[dict(label="Play",
@@ -188,9 +216,14 @@ def create_interactive_time_evolving_network(networks, df):
         )]
     )
     
-    fig.update_xaxes(showgrid=False, zeroline=False, showticklabels=False)
-    fig.update_yaxes(showgrid=False, zeroline=False, showticklabels=False)
-
+    fig.update_xaxes(showgrid=False, zeroline=False, showticklabels=False, row=1, col=1)
+    fig.update_yaxes(showgrid=False, zeroline=False, showticklabels=False, row=1, col=1)
+    
+    fig.update_xaxes(title_text="Time Step", row=2, col=2, range=[0, len(networks)-1])
+    fig.update_yaxes(title_text="Total Wallet Value", row=2, col=2, 
+                     range=[min_wallet*0.9, max_wallet*1.1], 
+                     tickformat=".2e")
+    
     fig.frames = frames
 
     return fig
