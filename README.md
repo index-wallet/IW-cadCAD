@@ -30,6 +30,15 @@ The object saved in this pickle file is the output of `cadCAD`s simulation execu
 
 `gen_sim_forks.py`: For some sim file, it creates many new sim files with the same initial state except for a simple perturbation applied. This executable only generates the _initial timestep_ for these sims. By specifying a `conf_file` in `gen_sim.py`, it can be seen how these perturbations evolve through time.
 
+### New Executable
+
+`new_view_sim.py` An experimental GUI to view the simulation. This is a more advanced version of `view_sim.py` that uses networkx and plotly to display the simulation. 
+
+It uses a WebGUI. Just like the previous sim it is color based on the agent's wallet ratio albeit using a slightly different method.
+
+As of right now it features a color-coded network grid of agents, a slider to change the timestep, hover-over tooltips to see agent information, a table of the top agents by wallet ratio, and a color-coded bar for the legend.
+
+
 ## Parameters
 
 The file `src/sim/params.py` contains many parameters that can adjust model execution. Below is a brief explanation of each of them.
