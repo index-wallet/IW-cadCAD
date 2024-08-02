@@ -8,6 +8,8 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 
+from util.utils import get_latest_directory
+
 
 def scatter(assessments_dict: Dict, savepath: str):
     # TODO: if I have num_currencies != 1 or 2, this gets weird
@@ -75,6 +77,6 @@ def report(filename: str):
         lineplot(currency_lists[i], save_dir + f"currency_{i+1}.png")
 
 
-directory = "sim_results/042d5539db3f0f6994f46681190e5ee48a2de812"
+directory = get_latest_directory()
 for file in os.listdir(directory):
     report(os.path.join(directory, file))

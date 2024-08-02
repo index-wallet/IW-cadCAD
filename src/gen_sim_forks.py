@@ -2,7 +2,8 @@ import numpy as np
 import networkx as nx
 import pandas as pd
 import pickle
-import os
+
+from util.utils import get_latest_sim
 
 
 def find_extreme_nodes(df: pd.DataFrame):
@@ -16,7 +17,8 @@ def find_extreme_nodes(df: pd.DataFrame):
     return (rich_node, poor_node)
 
 
-simfile = "sim_results/99f8fb74a11cbfcf345671cf823f6af5ef1700c9/2024-06-27 14:32:14.sim"
+simfile = get_latest_sim()
+
 df = pickle.load(open(simfile, "rb"))
 
 if type(df) is pd.Series:
