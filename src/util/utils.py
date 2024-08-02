@@ -13,7 +13,14 @@ def get_latest_directory() -> str:
     commit_hash_dir = os.path.join("sim_results", commit_hash)
 
     if not os.path.exists(commit_hash_dir):
-        raise FileNotFoundError("No simulation results found for latest commit")
+        logging.warning(f"No sim_results found for commit hash: {commit_hash} Using latest directory")
+
+        # Get the latest directory
+        commit_hash_dir = max(
+            [os.path.join("sim_results", d) for d in os.listdir("sim_results")],
+            key=lambda x: os.path.getctime(x))
+        
+        logging.warning(f"Using directory: {commit_hash_dir}")
     
     return commit_hash_dir
 
