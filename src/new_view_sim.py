@@ -77,34 +77,17 @@ def create_interactive_time_evolving_network(networks, df):
     """ Create an interactive plotly figure showing the time evolving networks """
     frames = []
     
-    fig = make_subplots(rows=3, cols=2, 
+    fig = make_subplots(rows=2, cols=2, 
                         column_widths=[0.7, 0.3],
-                        row_heights=[0.4, 0.3, 0.3],
-                        specs=[[{"type": "scatter", "rowspan": 3}, {"type": "table"}],
-                               [None, {"type": "scatter"}],
+                        row_heights=[0.6, 0.4],
+                        specs=[[{"type": "scatter", "rowspan": 2}, {"type": "scatter"}],
                                [None, {"type": "scatter"}]])
     
     wallet_data = {}
-    scatter_x_all = []
-    scatter_y_all = []
 
-    for t, network in enumerate(networks):
-        for node in network.nodes():
-            if node not in wallet_data:
-                wallet_data[node] = []
-            wallet_data[node].append(sum(network.nodes[node]['wallet']))
-        
-        scatter_x = [network.nodes[node]['pricing_assessment'][0] for node in network.nodes()]
-        scatter_y = [network.nodes[node]['pricing_assessment'][1] for node in network.nodes()]
-        scatter_x_all.extend(scatter_x)
-        scatter_y_all.extend(scatter_y)
-    
-    min_wallet = min(min(values) for values in wallet_data.values())
-    max_wallet = max(max(values) for values in wallet_data.values())
-    
-    overall_scatter_x_range = [min(scatter_x_all), max(scatter_x_all)]
-    overall_scatter_y_range = [min(scatter_y_all), max(scatter_y_all)]
-    
+    def safe_log10(x):
+        return np.log10(max(abs(x), 1e-10))
+
     for t, G in enumerate(networks):
         pos = {node: node for node in G.nodes()}
         node_x = [pos[node][1] for node in G.nodes()]
@@ -114,6 +97,10 @@ def create_interactive_time_evolving_network(networks, df):
         
         hover_texts = []
         for node in G.nodes():
+            if node not in wallet_data:
+                wallet_data[node] = []
+            wallet_data[node].append(sum(G.nodes[node]['wallet']))
+            
             hover_text = f"Node: {node}<br>"
             hover_text += f"Best Vendors: {G.nodes[node]['best_vendors']}<br>"
             hover_text += f"Wallet: {G.nodes[node]['wallet']}<br>"
@@ -151,40 +138,20 @@ def create_interactive_time_evolving_network(networks, df):
             mode='lines'
         )
         
-        avg_asmt = calc_average_valuations(df.iloc[t])
+        scatter_x = [G.nodes[node]['pricing_assessment'][0] for node in G.nodes()]
+        scatter_y = [G.nodes[node]['pricing_assessment'][1] for node in G.nodes()]
         
-        table_data = create_simplified_table_data(G)
+        log_x = [safe_log10(x) for x in scatter_x]
+        log_y = [safe_log10(y) for y in scatter_y]
         
-        table_trace = go.Table(
-            header=dict(values=["Node", "Wallet Ratio"],
-                        fill_color='paleturquoise',
-                        align='left'),
-            cells=dict(values=table_data,
-                       fill_color='lavender',
-                       align='left'),
-            visible=True
-        )
+        log_x_min, log_x_max = min(log_x), max(log_x)
+        log_y_min, log_y_max = min(log_y), max(log_y)
         
-        wallet_traces = []
-        for node, wallet_values in wallet_data.items():
-            wallet_trace = go.Scatter(
-                x=list(range(t+1)),
-                y=wallet_values,
-                mode='lines',
-                name=f'Node {node}',
-                line=dict(width=1),
-                showlegend=False
-            )
-            wallet_traces.append(wallet_trace)
+        x_padding = (log_x_max - log_x_min) * 0.1
+        y_padding = (log_y_max - log_y_min) * 0.1
         
-        scatter_x = []
-        scatter_y = []
-        scatter_text = []
-
-        for node, assessment in G.nodes(data='pricing_assessment'):
-            scatter_x.append(assessment[0])
-            scatter_y.append(assessment[1])
-            scatter_text.append(f"Node: {node}<br>Assessment: {assessment}")
+        log_x_range = [log_x_min - x_padding, log_x_max + x_padding]
+        log_y_range = [log_y_min - y_padding, log_y_max + y_padding]
         
         scatter_trace = go.Scatter(
             x=scatter_x,
@@ -196,38 +163,46 @@ def create_interactive_time_evolving_network(networks, df):
                 colorscale='Viridis',
                 showscale=False
             ),
-            text=scatter_text,
+            text=[f"Node: {node}<br>Assessment: {G.nodes[node]['pricing_assessment']}" for node in G.nodes()],
             hoverinfo='text',
             name='Pricing Assessments'
         )
         
-        ## Calculate the range for this timestep
-        scatter_x_range = [min(scatter_x), max(scatter_x)]
-        scatter_y_range = [min(scatter_y), max(scatter_y)]
+        wallet_traces = []
+        for node, values in wallet_data.items():
+            wallet_trace = go.Scatter(
+                x=list(range(t+1)),
+                y=values,
+                mode='lines',
+                name=f'Node {node}',
+                line=dict(width=1),
+                showlegend=False
+            )
+            wallet_traces.append(wallet_trace)
         
-        ## Add some slight padding to the ranges
-        x_padding = (scatter_x_range[1] - scatter_x_range[0]) * 0.1
-        y_padding = (scatter_y_range[1] - scatter_y_range[0]) * 0.1
-        scatter_x_range = [scatter_x_range[0] - x_padding, scatter_x_range[1] + x_padding]
-        scatter_y_range = [scatter_y_range[0] - y_padding, scatter_y_range[1] + y_padding]
+        avg_asmt = calc_average_valuations(df.iloc[t])
         
         frames.append(go.Frame(
-            data=[edge_trace, node_trace, table_trace, scatter_trace] + wallet_traces,
+            data=[edge_trace, node_trace, scatter_trace] + wallet_traces,
             name=f't{t}',
             layout=go.Layout(
                 title=f"Average Valuations: Red, Blue = {avg_asmt}",
-                xaxis2=dict(range=scatter_x_range),
-                yaxis2=dict(range=scatter_y_range)
-            )
+                xaxis2=dict(range=log_x_range, type="log"),
+                yaxis2=dict(range=log_y_range, type="log")
+            ),
+            traces=[0, 1, 2] + list(range(3, 3 + len(wallet_traces)))
         ))
+
+    # Set initial ranges using the first frame
+    initial_log_x_range = frames[0].layout.xaxis2.range
+    initial_log_y_range = frames[0].layout.yaxis2.range
 
     fig.add_trace(frames[0].data[0], row=1, col=1)
     fig.add_trace(frames[0].data[1], row=1, col=1)
     fig.add_trace(frames[0].data[2], row=1, col=2)
-    fig.add_trace(frames[0].data[3], row=2, col=2)
     
-    for wallet_trace in frames[0].data[4:]:
-        fig.add_trace(wallet_trace, row=3, col=2)
+    for wallet_trace in frames[0].data[3:]:
+        fig.add_trace(wallet_trace, row=2, col=2)
 
     fig.update_layout(
         title=f"Average Valuations: Red, Blue = {calc_average_valuations(df.iloc[0])}",
@@ -238,9 +213,9 @@ def create_interactive_time_evolving_network(networks, df):
             type="buttons",
             buttons=[dict(label="Play",
                           method="animate",
-                          args=[None, {"frame": {"duration": 1000, "redraw": True},
+                          args=[None, {"frame": {"duration": 500, "redraw": True},
                                        "fromcurrent": True,
-                                       "transition": {"duration": 500, "easing": "cubic-in-out"}}]),
+                                       "transition": {"duration": 300, "easing": "quadratic-in-out"}}]),
                      dict(label="Pause",
                           method="animate",
                           args=[[None], {"frame": {"duration": 0, "redraw": False},
@@ -257,7 +232,7 @@ def create_interactive_time_evolving_network(networks, df):
                 visible=True,
                 xanchor="right"
             ),
-            transition=dict(duration=0),
+            transition=dict(duration=300, easing="cubic-in-out"),
             pad=dict(b=10, t=50),
             len=0.95, 
             x=0,
@@ -266,8 +241,8 @@ def create_interactive_time_evolving_network(networks, df):
                 method='animate',
                 args=[[f't{k}'],
                     dict(mode='immediate',
-                        frame=dict(duration=1000, redraw=True),
-                        transition=dict(duration=0))
+                        frame=dict(duration=500, redraw=True),
+                        transition=dict(duration=300, easing="quadratic-in-out"))
                     ],
                 label=f'{k}'
             ) for k in range(len(frames))]
@@ -277,14 +252,29 @@ def create_interactive_time_evolving_network(networks, df):
     fig.update_xaxes(showgrid=False, zeroline=False, showticklabels=False, row=1, col=1)
     fig.update_yaxes(showgrid=False, zeroline=False, showticklabels=False, row=1, col=1)
     
-    fig.update_xaxes(title_text="Red Currency Assessment", row=2, col=2, range=overall_scatter_x_range)
-    fig.update_yaxes(title_text="Blue Currency Assessment", row=2, col=2, range=overall_scatter_y_range)
+    fig.update_xaxes(title_text="Red Currency Assessment", row=1, col=2, 
+                     type="log", 
+                     exponentformat="power",
+                     showexponent="all",
+                     range=initial_log_x_range)
+    fig.update_yaxes(title_text="Blue Currency Assessment", row=1, col=2, 
+                     type="log", 
+                     exponentformat="power",
+                     showexponent="all",
+                     range=initial_log_y_range)
     
-    fig.update_xaxes(title_text="Time Step", row=3, col=2, range=[0, len(networks)-1])
-    fig.update_yaxes(title_text="Total Wallet Value", row=3, col=2, 
-                     range=[min_wallet*0.9, max_wallet*1.1], 
-                     tickformat=".2e")
+    fig.update_xaxes(title_text="Time Step", row=2, col=2, 
+                     range=[0, len(networks)-1],
+                     dtick=10)  # Set tick interval to 10
     
+    all_wallet_values = [value for values in wallet_data.values() for value in values]
+    min_wallet, max_wallet = min(all_wallet_values), max(all_wallet_values)
+    fig.update_yaxes(title_text="Total Wallet Value", row=2, col=2, 
+                     type="log",
+                     exponentformat="power",
+                     showexponent="all",
+                     range=[safe_log10(min_wallet*0.9), safe_log10(max_wallet*1.1)])
+
     fig.frames = frames
 
     return fig
