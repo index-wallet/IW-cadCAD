@@ -92,7 +92,15 @@ def create_interactive_time_evolving_network(networks, df):
         pos = {node: node for node in G.nodes()}
         node_x = [pos[node][1] for node in G.nodes()]
         node_y = [pos[node][0] for node in G.nodes()]
-        node_sizes = [10 for _ in G.nodes()]
+        
+        total_wallet_values = [sum(G.nodes[node]['wallet']) for node in G.nodes()]
+        max_wallet_value = max(total_wallet_values)
+        min_wallet_value = min(total_wallet_values)
+        
+        ## Scale da node sizes between 5 and 30 based on wallet value
+        node_sizes = [5 + 25 * (value - min_wallet_value) / (max_wallet_value - min_wallet_value) 
+                      if max_wallet_value != min_wallet_value else 15 for value in total_wallet_values]
+        
         node_colors = [G.nodes[node]['color'] for node in G.nodes()]
         
         hover_texts = []
