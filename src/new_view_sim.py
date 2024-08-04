@@ -15,17 +15,18 @@ from util.utils import get_latest_sim
 pio.renderers.default = "browser"
 
 def load_simulation_data(filepath):
-    """ Load simulation data from a pickle file """
+    """Load the sim data from a pickle file"""
 
     print(f"Loading simulation data from: {filepath}")
-
+    
     with open(filepath, 'rb') as file:
         df = pickle.load(file)
-
+    
     if isinstance(df, pd.Series):
         df = df.to_frame().T
+    
     print(f"Loaded DataFrame with shape: {df.shape}")
-
+    
     return df
 
 def calc_color(wallet):
@@ -42,7 +43,7 @@ def calc_color(wallet):
     return ratios[0]  ## Return the ratio of the first currency as a single value
 
 def create_network_from_grid(row):
-    """ Create a networkx graph from the grid data in a DataFrame"""
+    """Create a networkx graph from the grid data in a row of the DataFrame"""
     G = nx.Graph()
     grid = row['grid']
     best_vendors = row['best_vendors']
@@ -70,11 +71,89 @@ def create_network_from_grid(row):
     return G
 
 def create_time_evolving_network(df):
-    """ Create a list of networkx graphs from a DataFrame of simulation data """
+    """Create a list of networkx graphs from the DataFrame"""
     return [create_network_from_grid(row) for _, row in df.iterrows()]
 
+def safe_log10(x):
+    """Return the log10 of x, but return -10 if x is 0"""
+    return np.log10(max(abs(x), 1e-10))
+
+def create_network_trace(G, layout='grid'):
+    """Create plotly traces for the networkx graph"""
+
+    if layout == 'grid':
+        pos = {node: node for node in G.nodes()}
+
+    elif layout == 'force':
+        pos = nx.spring_layout(G, k=1/np.sqrt(len(G.nodes())), iterations=50)
+        
+        ## Normalize positions to [0, 1]
+        x_coords = [pos[node][0] for node in G.nodes()]
+        y_coords = [pos[node][1] for node in G.nodes()]
+        x_min, x_max = min(x_coords), max(x_coords)
+        y_min, y_max = min(y_coords), max(y_coords)
+        x_range = x_max - x_min
+        y_range = y_max - y_min
+        pos = {node: ((pos[node][0] - x_min) / x_range, (pos[node][1] - y_min) / y_range) for node in G.nodes()}
+
+    node_x = [pos[node][0] for node in G.nodes()]
+    node_y = [pos[node][1] for node in G.nodes()]
+
+    total_wallet_values = [sum(G.nodes[node]['wallet']) for node in G.nodes()]
+    max_wallet_value = max(total_wallet_values)
+    min_wallet_value = min(total_wallet_values)
+
+    node_sizes = [5 + 25 * (value - min_wallet_value) / (max_wallet_value - min_wallet_value) 
+                  if max_wallet_value != min_wallet_value else 15 for value in total_wallet_values]
+
+    node_colors = [G.nodes[node]['color'] for node in G.nodes()]
+
+    hover_texts = []
+
+    for node in G.nodes():
+        hover_text = f"Node: {node}<br>"
+        hover_text += f"Best Vendors: {G.nodes[node]['best_vendors']}<br>"
+        hover_text += f"Wallet: {G.nodes[node]['wallet']}<br>"
+        hover_text += f"Currency Valuation: {G.nodes[node]['inherited_assessment']}<br>"
+        hover_text += f"Price: {G.nodes[node]['price']}<br>"
+        hover_text += f"Demand: {G.nodes[node]['demand']}"
+        hover_texts.append(hover_text)
+
+    edge_x, edge_y = [], []
+
+    for edge in G.edges():
+        x0, y0 = pos[edge[0]][0], pos[edge[0]][1]
+        x1, y1 = pos[edge[1]][0], pos[edge[1]][1]
+        edge_x.extend([x0, x1, None])
+        edge_y.extend([y0, y1, None])
+
+    node_trace = go.Scatter(
+        x=node_x, y=node_y,
+        mode='markers',
+        marker=dict(
+            size=node_sizes,
+            color=node_colors,
+            colorscale='Viridis',
+            showscale=True,
+            colorbar=dict(title="Wallet Ratio")
+        ),
+        text=hover_texts,
+        hoverinfo='text',
+        hoverlabel=dict(namelength=-1)
+    )
+
+    edge_trace = go.Scatter(
+        x=edge_x, y=edge_y,
+        line=dict(width=0.5, color='#888'),
+        hoverinfo='none',
+        mode='lines'
+    )
+
+    return edge_trace, node_trace
+
 def create_interactive_time_evolving_network(networks, df):
-    """ Create an interactive plotly figure showing the time evolving networks """
+    """Create an interactive plotly figure of the time-evolving networks"""
+
     frames = []
     
     fig = make_subplots(rows=2, cols=2, 
@@ -85,66 +164,17 @@ def create_interactive_time_evolving_network(networks, df):
     
     wallet_data = {}
 
-    def safe_log10(x):
-        return np.log10(max(abs(x), 1e-10))
+
+    def update_layout(layout):
+        """Update the visibility of the traces based on the layout"""
+        return [
+            {'visible': [layout == 'grid', layout == 'grid', layout == 'force', layout == 'force', True] + [True] * len(wallet_data)},
+            {'title': f"{layout.capitalize()} Layout"}
+        ]
 
     for t, G in enumerate(networks):
-        pos = {node: node for node in G.nodes()}
-        node_x = [pos[node][1] for node in G.nodes()]
-        node_y = [pos[node][0] for node in G.nodes()]
-        
-        total_wallet_values = [sum(G.nodes[node]['wallet']) for node in G.nodes()]
-        max_wallet_value = max(total_wallet_values)
-        min_wallet_value = min(total_wallet_values)
-        
-        ## Scale da node sizes between 5 and 30 based on wallet value
-        node_sizes = [5 + 25 * (value - min_wallet_value) / (max_wallet_value - min_wallet_value) 
-                      if max_wallet_value != min_wallet_value else 15 for value in total_wallet_values]
-        
-        node_colors = [G.nodes[node]['color'] for node in G.nodes()]
-        
-        hover_texts = []
-        for node in G.nodes():
-            if node not in wallet_data:
-                wallet_data[node] = []
-            wallet_data[node].append(sum(G.nodes[node]['wallet']))
-            
-            hover_text = f"Node: {node}<br>"
-            hover_text += f"Best Vendors: {G.nodes[node]['best_vendors']}<br>"
-            hover_text += f"Wallet: {G.nodes[node]['wallet']}<br>"
-            hover_text += f"Currency Valuation: {G.nodes[node]['inherited_assessment']}<br>"
-            hover_text += f"Price: {G.nodes[node]['price']}<br>"
-            hover_text += f"Demand: {G.nodes[node]['demand']}"
-            hover_texts.append(hover_text)
-        
-        edge_x, edge_y = [], []
-        for edge in G.edges():
-            x0, y0 = pos[edge[0]][1], pos[edge[0]][0]
-            x1, y1 = pos[edge[1]][1], pos[edge[1]][0]
-            edge_x.extend([x0, x1, None])
-            edge_y.extend([y0, y1, None])
-        
-        node_trace = go.Scatter(
-            x=node_x, y=node_y,
-            mode='markers',
-            marker=dict(
-                size=node_sizes,
-                color=node_colors,
-                colorscale='Viridis',
-                showscale=True,
-                colorbar=dict(title="Wallet Ratio")
-            ),
-            text=hover_texts,
-            hoverinfo='text',
-            hoverlabel=dict(namelength=-1)
-        )
-        
-        edge_trace = go.Scatter(
-            x=edge_x, y=edge_y,
-            line=dict(width=0.5, color='#888'),
-            hoverinfo='none',
-            mode='lines'
-        )
+        grid_edge_trace, grid_node_trace = create_network_trace(G, layout='grid')
+        force_edge_trace, force_node_trace = create_network_trace(G, layout='force')
         
         scatter_x = [G.nodes[node]['pricing_assessment'][0] for node in G.nodes()]
         scatter_y = [G.nodes[node]['pricing_assessment'][1] for node in G.nodes()]
@@ -152,14 +182,8 @@ def create_interactive_time_evolving_network(networks, df):
         log_x = [safe_log10(x) for x in scatter_x]
         log_y = [safe_log10(y) for y in scatter_y]
         
-        log_x_min, log_x_max = min(log_x), max(log_x)
-        log_y_min, log_y_max = min(log_y), max(log_y)
-        
-        x_padding = (log_x_max - log_x_min) * 0.1
-        y_padding = (log_y_max - log_y_min) * 0.1
-        
-        log_x_range = [log_x_min - x_padding, log_x_max + x_padding]
-        log_y_range = [log_y_min - y_padding, log_y_max + y_padding]
+        log_x_range = [min(log_x) - 0.1, max(log_x) + 0.1]
+        log_y_range = [min(log_y) - 0.1, max(log_y) + 0.1]
         
         scatter_trace = go.Scatter(
             x=scatter_x,
@@ -167,7 +191,7 @@ def create_interactive_time_evolving_network(networks, df):
             mode='markers',
             marker=dict(
                 size=8,
-                color=node_colors,
+                color=grid_node_trace.marker.color,
                 colorscale='Viridis',
                 showscale=False
             ),
@@ -175,6 +199,11 @@ def create_interactive_time_evolving_network(networks, df):
             hoverinfo='text',
             name='Pricing Assessments'
         )
+        
+        for node in G.nodes():
+            if node not in wallet_data:
+                wallet_data[node] = []
+            wallet_data[node].append(sum(G.nodes[node]['wallet']))
         
         wallet_traces = []
         for node, values in wallet_data.items():
@@ -191,34 +220,37 @@ def create_interactive_time_evolving_network(networks, df):
         avg_asmt = calc_average_valuations(df.iloc[t])
         
         frames.append(go.Frame(
-            data=[edge_trace, node_trace, scatter_trace] + wallet_traces,
+            data=[grid_edge_trace, grid_node_trace, force_edge_trace, force_node_trace, scatter_trace] + wallet_traces,
             name=f't{t}',
             layout=go.Layout(
                 title=f"Average Valuations: Red, Blue = {avg_asmt}",
                 xaxis2=dict(range=log_x_range, type="log"),
                 yaxis2=dict(range=log_y_range, type="log")
-            ),
-            traces=[0, 1, 2] + list(range(3, 3 + len(wallet_traces)))
+            )
         ))
 
-    # Set initial ranges using the first frame
-    initial_log_x_range = frames[0].layout.xaxis2.range
-    initial_log_y_range = frames[0].layout.yaxis2.range
-
-    fig.add_trace(frames[0].data[0], row=1, col=1)
-    fig.add_trace(frames[0].data[1], row=1, col=1)
-    fig.add_trace(frames[0].data[2], row=1, col=2)
+    fig.add_trace(grid_edge_trace, row=1, col=1)
+    fig.add_trace(grid_node_trace, row=1, col=1)
+    fig.add_trace(force_edge_trace, row=1, col=1)
+    fig.add_trace(force_node_trace, row=1, col=1)
+    fig.add_trace(scatter_trace, row=1, col=2)
     
-    for wallet_trace in frames[0].data[3:]:
+    for wallet_trace in wallet_traces:
         fig.add_trace(wallet_trace, row=2, col=2)
 
-    fig.update_layout(
-        title=f"Average Valuations: Red, Blue = {calc_average_valuations(df.iloc[0])}",
-        showlegend=False,
-        hovermode='closest',
-        height=1000,
-        updatemenus=[dict(
+    ## Set the initial layout to grid
+    for i in range(len(fig.data)):
+        if i < 2: # Grid traces
+            fig.data[i].visible = True
+        elif i < 4:  # Force traces
+            fig.data[i].visible = False
+        else:  # Other traces (scatter, wallet)
+            fig.data[i].visible = True
+
+    updatemenus = [
+        dict(
             type="buttons",
+            direction="left",
             buttons=[dict(label="Play",
                           method="animate",
                           args=[None, {"frame": {"duration": 500, "redraw": True},
@@ -228,8 +260,32 @@ def create_interactive_time_evolving_network(networks, df):
                           method="animate",
                           args=[[None], {"frame": {"duration": 0, "redraw": False},
                                          "mode": "immediate",
-                                         "transition": {"duration": 0}}])]
-        )],
+                                         "transition": {"duration": 0}}])],
+        ),
+        dict(
+            buttons=[
+                dict(label="Grid Layout",
+                     method="update",
+                     args=update_layout('grid')),
+                dict(label="Force-Directed Layout",
+                     method="update",
+                     args=update_layout('force'))
+            ],
+            direction="down",
+            showactive=True,
+            xanchor="left",
+            y=0.9,
+            x=-0.13,
+            yanchor="top"
+        )
+    ]
+
+    fig.update_layout(
+        title=f"Average Valuations: Red, Blue = {calc_average_valuations(df.iloc[0])}",
+        showlegend=False,
+        hovermode='closest',
+        height=1000,
+        updatemenus=updatemenus,
         sliders=[dict(
             active=0,
             yanchor="top",
@@ -263,17 +319,15 @@ def create_interactive_time_evolving_network(networks, df):
     fig.update_xaxes(title_text="Red Currency Assessment", row=1, col=2, 
                      type="log", 
                      exponentformat="power",
-                     showexponent="all",
-                     range=initial_log_x_range)
+                     showexponent="all")
     fig.update_yaxes(title_text="Blue Currency Assessment", row=1, col=2, 
                      type="log", 
                      exponentformat="power",
-                     showexponent="all",
-                     range=initial_log_y_range)
+                     showexponent="all")
     
     fig.update_xaxes(title_text="Time Step", row=2, col=2, 
                      range=[0, len(networks)-1],
-                     dtick=10)  # Set tick interval to 10
+                     dtick=10)
     
     all_wallet_values = [value for values in wallet_data.values() for value in values]
     min_wallet, max_wallet = min(all_wallet_values), max(all_wallet_values)
@@ -287,17 +341,8 @@ def create_interactive_time_evolving_network(networks, df):
 
     return fig
 
-def create_simplified_table_data(G):
-    """ Create simplified table data for the current timestep """
-    nodes = sorted(G.nodes())
-    wallet_ratios = [np.mean(G.nodes[node]['wallet']) if G.nodes[node]['wallet'].any() else 0 for node in nodes]
-    sorted_indices = np.argsort(wallet_ratios)[::-1]  # Descending order
-    sorted_nodes = [nodes[i] for i in sorted_indices]
-    sorted_wallet_ratios = [wallet_ratios[i] for i in sorted_indices]
-    return [sorted_nodes, sorted_wallet_ratios]
-
 def calc_average_valuations(row):
-    """ Calculate the average valuations of the grid at a given timestep """
+    """Calculate the average valuation of all nodes in a row"""
     asmts = row['pricing_assessments']
     valuation = np.array([0.0, 0.0])
     for _, asmt in asmts.items():
