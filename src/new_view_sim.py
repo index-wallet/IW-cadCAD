@@ -166,9 +166,25 @@ force_layouts = pre_calculate_force_layouts(networks)
 
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
-
 app.layout = html.Div([
-    dcc.Graph(id='network-graph', style={'height': '80vh'}),
+    html.Div([
+        html.Div([
+            dbc.Button('Play/Pause', id='play-pause-button', n_clicks=0, color="primary", className="mb-2 w-100"),
+            dcc.Dropdown(
+                id='layout-toggle',
+                options=[
+                    {'label': 'Grid Layout', 'value': 'grid'},
+                    {'label': 'Force-Directed Layout', 'value': 'force'}
+                ],
+                value='grid',
+                clearable=False,
+                searchable=False,
+                style={'width': '100%'}
+            ),
+        ], style={'width': '200px', 'position': 'absolute', 'left': '10px', 'top': '50px', 'zIndex': '1000'}),
+        dcc.Graph(id='network-graph', style={'height': '80vh', 'width': 'calc(100% - 220px)', 'marginLeft': '220px'}),
+    ], style={'position': 'relative', 'height': '80vh'}),
+    
     html.Div([
         dcc.Slider(
             id='time-slider',
@@ -176,30 +192,56 @@ app.layout = html.Div([
             max=num_timesteps,
             step=1,
             value=0,
-            marks={i: {'label': str(i), 'style': {'transform': 'rotate(-45deg)'}} for i in range(0, num_timesteps + 1, 5)},
+            marks={i: {'label': str(i)} for i in range(0, num_timesteps + 1, 5)},
             tooltip={"placement": "bottom", "always_visible": True}
         ),
     ], style={'width': '95%', 'margin': '20px auto', 'padding-top': '20px'}),
-    html.Div([
-        dbc.Button('Play/Pause', id='play-pause-button', n_clicks=0, color="primary", className="mr-2"),
-        dbc.RadioItems(
-            id='layout-toggle',
-            options=[
-                {'label': 'Grid Layout', 'value': 'grid'},
-                {'label': 'Force-Directed Layout', 'value': 'force'}
-            ],
-            value='grid',
-            inline=True,
-            style={'display': 'inline-block', 'margin-left': '20px'}
-        ),
-    ], style={'textAlign': 'center', 'margin': '20px 0'}),
+    
     dcc.Interval(
         id='interval-component',
-        interval=500,  # in milliseconds
+        interval=1000,
         n_intervals=0,
         disabled=True
     ),
 ])
+
+app.index_string = '''
+<!DOCTYPE html>
+<html>
+    <head>
+        {%metas%}
+        <title>{%title%}</title>
+        {%favicon%}
+        {%css%}
+        <style>
+            .rc-slider-track {
+                background-color: #007bff;
+            }
+            .rc-slider-handle {
+                border-color: #007bff;
+                background-color: #007bff;
+            }
+            .rc-slider-handle:hover {
+                border-color: #0056b3;
+            }
+            .rc-slider-handle-active:active {
+                border-color: #0056b3;
+            }
+            .rc-slider-mark-text {
+                color: #495057;
+            }
+        </style>
+    </head>
+    <body>
+        {%app_entry%}
+        <footer>
+            {%config%}
+            {%scripts%}
+            {%renderer%}
+        </footer>
+    </body>
+</html>
+'''
 
 @app.callback(
     Output('network-graph', 'figure'),
@@ -216,7 +258,8 @@ def update_graph(time_step, layout):
                         specs=[[{"type": "scatter", "rowspan": 2}, {"type": "scatter"}],
                                [None, {"type": "scatter"}]],
                         vertical_spacing=0.08,
-                        horizontal_spacing=0.08)
+                        horizontal_spacing=0.08,
+                        subplot_titles=["", f"Currency Assessments (Step {time_step})", ""])
     
     if layout == 'force':
         edge_trace, node_trace = create_network_trace(G, layout='force', pos=force_layouts[time_step])
