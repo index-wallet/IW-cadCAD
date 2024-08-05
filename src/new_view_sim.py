@@ -1,5 +1,8 @@
+# built-in
+from itertools import combinations
 import pickle
 
+# third-party
 import pandas as pd
 
 import numpy as np
@@ -15,6 +18,7 @@ from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 
+# custom
 from util.utils import get_latest_sim
 
 def load_simulation_data(filepath):
@@ -157,9 +161,16 @@ def pre_calculate_force_layouts(networks):
     return force_layouts
 
 
+def get_currency_pairs(df):
+    """Get all possible currency pairs from the DataFrame"""
+    sample_wallet = df.iloc[0]['grid'].nodes[list(df.iloc[0]['grid'].nodes)[0]]['agent'].wallet
+    currencies = range(len(sample_wallet))
+    return list(combinations(currencies, 2))
+
 df = load_simulation_data(get_latest_sim())
 networks = create_time_evolving_network(df)
 num_timesteps = len(df) - 1
+currency_pairs = get_currency_pairs(df)
 
 # Pre-calculate force-directed layouts
 force_layouts = pre_calculate_force_layouts(networks)
@@ -181,6 +192,18 @@ app.layout = html.Div([
                 searchable=False,
                 style={'width': '100%'}
             ),
+            dcc.Dropdown(
+                id='currency-pair-dropdown',
+                options=[{'label': f'Currency {pair[0]} vs Currency {pair[1]}', 'value': f'{pair[0]},{pair[1]}'} for pair in currency_pairs],
+                value=f'{currency_pairs[0][0]},{currency_pairs[0][1]}',
+                clearable=False,
+                searchable=False,
+                style={
+                    'width': '100%', 
+                    'marginTop': '10px',
+                    'fontSize': '12px'
+                }
+            ),
         ], style={'width': '200px', 'position': 'absolute', 'left': '10px', 'top': '50px', 'zIndex': '1000'}),
         dcc.Graph(id='network-graph', style={'height': '80vh', 'width': 'calc(100% - 220px)', 'marginLeft': '220px'}),
     ], style={'position': 'relative', 'height': '80vh'}),
@@ -195,7 +218,7 @@ app.layout = html.Div([
             marks={i: {'label': str(i)} for i in range(0, num_timesteps + 1, 5)},
             tooltip={"placement": "bottom", "always_visible": True}
         ),
-    ], style={'width': '95%', 'margin': '20px auto', 'padding-top': '20px'}),
+    ], style={'width': '95%', 'margin': '20px auto', 'paddingTop': '20px'}),
     
     dcc.Interval(
         id='interval-component',
@@ -246,10 +269,11 @@ app.index_string = '''
 @app.callback(
     Output('network-graph', 'figure'),
     [Input('time-slider', 'value'),
-     Input('layout-toggle', 'value')]
+     Input('layout-toggle', 'value'),
+     Input('currency-pair-dropdown', 'value')]
 )
-def update_graph(time_step, layout):
-    """Update the graph based on the time step and layout selection"""
+def update_graph(time_step, layout, currency_pair):
+    """Update the graph based on the time step, layout selection, and currency pair"""
     G = networks[time_step]
     
     fig = make_subplots(rows=2, cols=2, 
@@ -269,8 +293,9 @@ def update_graph(time_step, layout):
     fig.add_trace(edge_trace, row=1, col=1)
     fig.add_trace(node_trace, row=1, col=1)
     
-    scatter_x = [G.nodes[node]['pricing_assessment'][0] for node in G.nodes()]
-    scatter_y = [G.nodes[node]['pricing_assessment'][1] for node in G.nodes()]
+    currency_1, currency_2 = map(int, currency_pair.split(','))
+    scatter_x = [G.nodes[node]['pricing_assessment'][currency_1] for node in G.nodes()]
+    scatter_y = [G.nodes[node]['pricing_assessment'][currency_2] for node in G.nodes()]
     
     scatter_trace = go.Scatter(
         x=scatter_x,
@@ -308,24 +333,27 @@ def update_graph(time_step, layout):
     
     avg_asmt = calc_average_valuations(df.iloc[time_step])
     
+    currency_valuations = [f'Currency {i}: {v:.2f}' for i, v in enumerate(avg_asmt)]
+    title = f"Time Step: {time_step} | Average Valuations: {', '.join(currency_valuations)}"
+    
     fig.update_layout(
-        title=f"Time Step: {time_step} | Average Valuations: Red, Blue = {avg_asmt}",
+        title=title,
         showlegend=False,
         hovermode='closest',
         height=800,
         margin=dict(l=20, r=20, t=50, b=20),
-        plot_bgcolor='rgba(227, 234, 255, 0.8)',  # Light blue background for plot areas
-        paper_bgcolor='white'  # White background for the overall figure
+        plot_bgcolor='rgba(227, 234, 255, 0.8)',
+        paper_bgcolor='white'
     )
     
     fig.update_xaxes(showgrid=False, zeroline=False, showticklabels=False, row=1, col=1)
     fig.update_yaxes(showgrid=False, zeroline=False, showticklabels=False, row=1, col=1)
     
-    fig.update_xaxes(title_text="Red Currency Assessment", row=1, col=2, 
+    fig.update_xaxes(title_text=f"Currency {currency_1} Assessment", row=1, col=2, 
                      type="log", 
                      exponentformat="power",
                      showexponent="all")
-    fig.update_yaxes(title_text="Blue Currency Assessment", row=1, col=2, 
+    fig.update_yaxes(title_text=f"Currency {currency_2} Assessment", row=1, col=2, 
                      type="log", 
                      exponentformat="power",
                      showexponent="all")
@@ -359,12 +387,15 @@ def toggle_interval(n_clicks, current_state):
     Output('time-slider', 'value'),
     [Input('interval-component', 'n_intervals')],
     [State('time-slider', 'value'),
-     State('time-slider', 'max')]
+     State('time-slider', 'max'),
+     State('interval-component', 'disabled')]
 )
-def update_slider(n, current_value, max_value):
+def update_slider(n, current_value, max_value, is_disabled):
+    if is_disabled:  # Add this check
+        raise PreventUpdate
     if current_value >= max_value:
         return 0
     return current_value + 1
 
 if __name__ == '__main__':
-    app.run_server(debug=True)
+    app.run(debug=True, port=8050)
