@@ -34,18 +34,16 @@ def load_simulation_data(filepath):
     
     return df
 
-def calculate_node_color(wallet):
-    """ Calculate the color of a node based on the wallet ratios """
+def calculate_node_color(wallet, currency_1, currency_2):
+    """Calculate the color of a node based on the ratio of two selected currencies"""
+    sum_selected = wallet[currency_1] + wallet[currency_2]
 
-    sum_wallet = np.sum(wallet)
+    if sum_selected == 0:
+        return 0 
+    
+    ratio = wallet[currency_1] / sum_selected
 
-    if sum_wallet == 0:
-        return 0
-    ratios = [currency / sum_wallet for currency in wallet]
-
-    ## Need to come back to this, pretty sure we're doing it different than the original.
-    ## May also want to change in general to something else
-    return ratios[0]  ## Return the ratio of the first currency as a single value
+    return ratio
 
 def create_network_from_grid(row):
     """Create a networkx graph from the grid data in a row of the DataFrame"""
@@ -62,8 +60,7 @@ def create_network_from_grid(row):
                    pricing_assessment=pricing_assessments.get(node, []),
                    wallet=agent.wallet,
                    price=agent.price,
-                   demand=agent.demand,
-                   color=calculate_node_color(agent.wallet))
+                   demand=agent.demand)
     
     grid_size = int(np.sqrt(len(grid.nodes)))
     for i in range(grid_size):
@@ -83,7 +80,7 @@ def safe_log10(x):
     """Return the log10 of x, but return -10 if x is 0"""
     return np.log10(max(abs(x), 1e-10))
 
-def create_network_trace(G, layout='grid', pos=None):
+def create_network_trace(G, layout='grid', pos=None, currency_1=0, currency_2=1):
     """Create plotly traces for the networkx graph"""
 
     if layout == 'grid':
@@ -98,8 +95,16 @@ def create_network_trace(G, layout='grid', pos=None):
     node_sizes = [5 + 25 * (value - min_wallet_value) / (max_wallet_value - min_wallet_value) 
                   if max_wallet_value != min_wallet_value else 15 for value in total_wallet_values]
 
-    node_colors = [G.nodes[node]['color'] for node in G.nodes()]
+    node_colors = [calculate_node_color(G.nodes[node]['wallet'], currency_1, currency_2) for node in G.nodes()]
 
+    custom_colorscale = [
+        [0, 'rgb(165,0,38)'],    ## Dark red
+        [0.25, 'rgb(215,48,39)'],  ## Red
+        [0.5, 'rgb(244,109,67)'],  ## Light red
+        [0.75, 'rgb(69,117,180)'],  ## Light blue
+        [1, 'rgb(49,54,149)']    ## Dark blue
+    ]
+    
     hover_texts = [
         f"Node: {node}<br>"
         f"Best Vendors: {G.nodes[node]['best_vendors']}<br>"
@@ -124,9 +129,14 @@ def create_network_trace(G, layout='grid', pos=None):
         marker=dict(
             size=node_sizes,
             color=node_colors,
-            colorscale='Viridis',
+            colorscale=custom_colorscale,
             showscale=True,
-            colorbar=dict(title="Wallet Ratio")
+            colorbar=dict(
+                title=f"Ratio of Currency {currency_1} to {currency_2}",
+                tickmode='array',
+                tickvals=[0, 0.25, 0.5, 0.75, 1],
+                ticktext=['0 (All Currency 1)', '0.25', '0.5 (Equal)', '0.75', '1 (All Currency 2)']
+            )
         ),
         text=hover_texts,
         hoverinfo='text',
@@ -331,23 +341,26 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
     )
     def update_graph(time_step, layout, currency_pair):
         """Update the graph based on the time step, layout selection, and currency pair"""
+        
         G = networks[time_step]
+        
+        currency_1, currency_2 = map(int, currency_pair.split(','))
         
         fig = make_subplots(rows=2, cols=2, 
                             column_widths=[0.7, 0.3],
                             row_heights=[0.7, 0.3],
                             specs=[[{"type": "scatter", "rowspan": 2}, {"type": "scatter"}],
-                                   [None, {"type": "scatter"}]],
+                                [None, {"type": "scatter"}]],
                             vertical_spacing=0.08,
                             horizontal_spacing=0.08,
                             subplot_titles=["", f"Currency Assessments (Step {time_step})", ""])
         
         if layout == 'force':
-            edge_trace, node_trace = create_network_trace(G, layout='force', pos=force_layouts[time_step])
+            edge_trace, node_trace = create_network_trace(G, layout='force', pos=force_layouts[time_step], currency_1=currency_1, currency_2=currency_2)
         elif layout == 'centrality':
-            edge_trace, node_trace = create_network_trace(G, layout='force', pos=centrality_layouts[time_step])
+            edge_trace, node_trace = create_network_trace(G, layout='force', pos=centrality_layouts[time_step], currency_1=currency_1, currency_2=currency_2)
         else:
-            edge_trace, node_trace = create_network_trace(G, layout='grid')
+            edge_trace, node_trace = create_network_trace(G, layout='grid', currency_1=currency_1, currency_2=currency_2)
         
         fig.add_trace(edge_trace, row=1, col=1)
         fig.add_trace(node_trace, row=1, col=1)
