@@ -140,7 +140,14 @@ def create_network_trace(G, layout='grid', pos=None, currency_1=0, currency_2=1)
         ),
         text=hover_texts,
         hoverinfo='text',
-        hoverlabel=dict(namelength=-1)
+        hoverlabel=dict(
+            bgcolor='white',
+            font_size=12,
+            font_family="Arial",
+            font_color='black',
+            bordercolor='black',
+            namelength=-1
+        )
     )
 
     edge_trace = go.Scatter(
@@ -150,7 +157,7 @@ def create_network_trace(G, layout='grid', pos=None, currency_1=0, currency_2=1)
         mode='lines'
     )
 
-    return edge_trace, node_trace
+    return edge_trace, node_trace, node_colors
 
 def calc_average_valuations(row):
     """Calculate the average valuation of all nodes in a row"""
@@ -334,10 +341,10 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
 </html>
 '''
     @app.callback(
-        Output('network-graph', 'figure'),
-        [Input('time-slider', 'value'),
-         Input('layout-toggle', 'value'),
-         Input('currency-pair-dropdown', 'value')]
+    Output('network-graph', 'figure'),
+    [Input('time-slider', 'value'),
+    Input('layout-toggle', 'value'),
+    Input('currency-pair-dropdown', 'value')]
     )
     def update_graph(time_step, layout, currency_pair):
         """Update the graph based on the time step, layout selection, and currency pair"""
@@ -356,16 +363,15 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
                             subplot_titles=["", f"Currency Assessments (Step {time_step})", ""])
         
         if layout == 'force':
-            edge_trace, node_trace = create_network_trace(G, layout='force', pos=force_layouts[time_step], currency_1=currency_1, currency_2=currency_2)
+            edge_trace, node_trace, node_colors = create_network_trace(G, layout='force', pos=force_layouts[time_step], currency_1=currency_1, currency_2=currency_2)
         elif layout == 'centrality':
-            edge_trace, node_trace = create_network_trace(G, layout='force', pos=centrality_layouts[time_step], currency_1=currency_1, currency_2=currency_2)
+            edge_trace, node_trace, node_colors = create_network_trace(G, layout='force', pos=centrality_layouts[time_step], currency_1=currency_1, currency_2=currency_2)
         else:
-            edge_trace, node_trace = create_network_trace(G, layout='grid', currency_1=currency_1, currency_2=currency_2)
+            edge_trace, node_trace, node_colors = create_network_trace(G, layout='grid', currency_1=currency_1, currency_2=currency_2)
         
         fig.add_trace(edge_trace, row=1, col=1)
         fig.add_trace(node_trace, row=1, col=1)
         
-        currency_1, currency_2 = map(int, currency_pair.split(','))
         scatter_x = [G.nodes[node]['pricing_assessment'][currency_1] for node in G.nodes()]
         scatter_y = [G.nodes[node]['pricing_assessment'][currency_2] for node in G.nodes()]
         
@@ -375,8 +381,8 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
             mode='markers',
             marker=dict(
                 size=8,
-                color=node_trace.marker.color,
-                colorscale='Viridis',
+                color=node_colors,
+                colorscale=node_trace.marker.colorscale,
                 showscale=False
             ),
             text=[f"Node: {node}<br>Assessment: {G.nodes[node]['pricing_assessment']}" for node in G.nodes()],
@@ -422,25 +428,25 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
         fig.update_yaxes(showgrid=False, zeroline=False, showticklabels=False, row=1, col=1)
         
         fig.update_xaxes(title_text=f"Currency {currency_1} Assessment", row=1, col=2, 
-                         type="log", 
-                         exponentformat="power",
-                         showexponent="all")
+                        type="log", 
+                        exponentformat="power",
+                        showexponent="all")
         fig.update_yaxes(title_text=f"Currency {currency_2} Assessment", row=1, col=2, 
-                         type="log", 
-                         exponentformat="power",
-                         showexponent="all")
+                        type="log", 
+                        exponentformat="power",
+                        showexponent="all")
         
         fig.update_xaxes(title_text="Time Step", row=2, col=2, 
-                         range=[0, num_timesteps],
-                         dtick=10)
+                        range=[0, num_timesteps],
+                        dtick=10)
         
         all_wallet_values = [value for values in wallet_data.values() for value in values]
         min_wallet, max_wallet = min(all_wallet_values), max(all_wallet_values)
         fig.update_yaxes(title_text="Total Wallet Value", row=2, col=2, 
-                         type="log",
-                         exponentformat="power",
-                         showexponent="all",
-                         range=[safe_log10(min_wallet*0.9), safe_log10(max_wallet*1.1)])
+                        type="log",
+                        exponentformat="power",
+                        showexponent="all",
+                        range=[safe_log10(min_wallet*0.9), safe_log10(max_wallet*1.1)])
         
         return fig
 
