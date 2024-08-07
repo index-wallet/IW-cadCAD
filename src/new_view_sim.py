@@ -452,11 +452,14 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
         title = f"Time Step: {time_step} | Average Valuations: {', '.join(currency_valuations)}"
         
         fig.update_layout(
-            title=title,
+            title=dict(
+                text=title,
+                font=dict(size=24)
+            ),
             showlegend=False,
             hovermode='closest',
             height=800,
-            margin=dict(l=20, r=20, t=60, b=20),
+            margin=dict(l=20, r=20, t=80, b=20),
             plot_bgcolor='rgba(227, 234, 255, 0.8)',
             paper_bgcolor='white'
         )
@@ -493,6 +496,11 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
         
         for i in range(len(fig.layout.annotations)):
             fig.layout.annotations[i].text += f" (Step {time_step})"
+
+        for row in range(1, 4):
+            for col in range(1, 3):
+                fig.update_xaxes(title_font=dict(size=14), row=row, col=col)
+                fig.update_yaxes(title_font=dict(size=14), row=row, col=col)
 
         return fig
 
