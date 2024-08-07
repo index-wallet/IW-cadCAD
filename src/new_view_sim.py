@@ -133,7 +133,7 @@ def create_network_trace(G, layout='grid', pos=None, currency_1=0, currency_2=1)
             colorscale=custom_colorscale,
             showscale=True,
             colorbar=dict(
-                title=f"Ratio of Currency {currency_1} to {currency_2}",
+                title=f"Ratio of Currency {currency_1+1} to {currency_2+1}",
                 tickmode='array',
                 tickvals=[0, 0.25, 0.5, 0.75, 1],
                 ticktext=['0 (All Currency 1)', '0.25', '0.5 (Equal)', '0.75', '1 (All Currency 2)']
@@ -269,7 +269,7 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
                 ),
                 dcc.Dropdown(
                     id='currency-pair-dropdown',
-                    options=[{'label': f'Currency {pair[0]} vs Currency {pair[1]}', 'value': f'{pair[0]},{pair[1]}'} for pair in currency_pairs],
+                    options=[{'label': f'Currency {pair[0]+1} vs Currency {pair[1]+1}', 'value': f'{pair[0]},{pair[1]}'} for pair in currency_pairs],
                     value=f'{currency_pairs[0][0]},{currency_pairs[0][1]}',
                     clearable=False,
                     searchable=False,
@@ -294,6 +294,8 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
                 tooltip={"placement": "bottom", "always_visible": True}
             ),
         ], style={'width': '95%', 'margin': '20px auto', 'paddingTop': '20px'}),
+        
+        html.Div(id='click-data', style={'margin': '20px', 'padding': '10px', 'backgroundColor': '#f0f0f0', 'borderRadius': '5px'}),
         
         dcc.Interval(
             id='interval-component',
@@ -347,8 +349,6 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
     Input('currency-pair-dropdown', 'value')]
     )
     def update_graph(time_step, layout, currency_pair):
-        """Update the graph based on the time step, layout selection, and currency pair"""
-        
         G = networks[time_step]
         
         currency_1, currency_2 = map(int, currency_pair.split(','))
@@ -360,7 +360,7 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
                                 [None, {"type": "scatter"}]],
                             vertical_spacing=0.08,
                             horizontal_spacing=0.08,
-                            subplot_titles=["", f"Currency Assessments (Step {time_step})", ""])
+                            subplot_titles=["", f"Currency {currency_1+1} vs Currency {currency_2+1} Assessments (Step {time_step})", ""])
         
         if layout == 'force':
             edge_trace, node_trace, node_colors = create_network_trace(G, layout='force', pos=force_layouts[time_step], currency_1=currency_1, currency_2=currency_2)
@@ -427,7 +427,7 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
         
         avg_asmt = calc_average_valuations(df.iloc[time_step])
         
-        currency_valuations = [f'Currency {i}: {v:.2f}' for i, v in enumerate(avg_asmt)]
+        currency_valuations = [f'Currency {i+1}: {v:.2f}' for i, v in enumerate(avg_asmt)]
         title = f"Time Step: {time_step} | Average Valuations: {', '.join(currency_valuations)}"
         
         fig.update_layout(
@@ -443,11 +443,11 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
         fig.update_xaxes(showgrid=False, zeroline=False, showticklabels=False, row=1, col=1)
         fig.update_yaxes(showgrid=False, zeroline=False, showticklabels=False, row=1, col=1)
         
-        fig.update_xaxes(title_text=f"Currency {currency_1} Assessment", row=1, col=2, 
+        fig.update_xaxes(title_text=f"Currency {currency_1+1} Assessment", row=1, col=2, 
                         type="log", 
                         exponentformat="power",
                         showexponent="all")
-        fig.update_yaxes(title_text=f"Currency {currency_2} Assessment", row=1, col=2, 
+        fig.update_yaxes(title_text=f"Currency {currency_2+1} Assessment", row=1, col=2, 
                         type="log", 
                         exponentformat="power",
                         showexponent="all")
@@ -490,29 +490,39 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
         if current_value >= max_value:
             return 0
         return current_value + 1
+    
+    @app.callback(
+        Output('click-data', 'children'),
+        [Input('network-graph', 'clickData')]
+    )
+    def display_click_data(clickData):
+        if clickData is None:
+            return "Click on a node to see its details"
+        else:
+            point = clickData['points'][0]
+            return f"Clicked on node: {point['text'].split('<br>')[0]}"
 
     return app
 
 if __name__ == '__main__':
 
-    ## setup logging
+    ## Setup logging
     logging.basicConfig(level=logging.DEBUG, 
-                        filename='passing.log',
-                        filemode='w', 
                         format='[%(asctime)s] [%(levelname)s] [%(filename)s] %(message)s', 
                         datefmt='%Y-%m-%d %H:%M:%S')
-
-    console = logging.StreamHandler()
-    console.setLevel(logging.INFO)
-    formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] [%(filename)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-    console.setFormatter(formatter)
-    logging.getLogger('').addHandler(console)
+    
+    if not any(isinstance(handler, logging.StreamHandler) for handler in logging.getLogger('').handlers):
+        console = logging.StreamHandler()
+        console.setLevel(logging.INFO)
+        formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] [%(filename)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+        console.setFormatter(formatter)
+        logging.getLogger('').addHandler(console)
 
     multiprocessing.freeze_support()
 
     df, networks, num_timesteps, currency_pairs, force_layouts, centrality_layouts = load_data_and_prepare_layouts()
 
-    logging.info("Creating Dash app...")
+    logging.info("Creating Dash app...") 
     app = create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, centrality_layouts)
 
     logging.info("Running Dash app...")
