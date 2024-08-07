@@ -387,6 +387,13 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
             ),
             text=[f"Node: {node}<br>Assessment: {G.nodes[node]['pricing_assessment']}" for node in G.nodes()],
             hoverinfo='text',
+            hoverlabel=dict(
+                bgcolor='white',
+                font_size=12,
+                font_family="Arial",
+                font_color='black',
+                bordercolor='black',
+            ),
             name='Pricing Assessments'
         )
         fig.add_trace(scatter_trace, row=1, col=2)
@@ -405,6 +412,15 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
                 mode='lines',
                 name=f'Node {node}',
                 line=dict(width=1),
+                hoverinfo='text',
+                hoverlabel=dict(
+                    bgcolor='white',
+                    font_size=12,
+                    font_family="Arial",
+                    font_color='black',
+                    bordercolor='black',
+                ),
+                text=[f"Node: {node}<br>Time Step: {t}<br>Total Wallet: {v:.4f}" for t, v in enumerate(values)],
                 showlegend=False
             )
             fig.add_trace(wallet_trace, row=2, col=2)
