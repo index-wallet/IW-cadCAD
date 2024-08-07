@@ -2,6 +2,7 @@
 from itertools import combinations
 import pickle
 import multiprocessing
+import logging
 
 ## third-party
 import pandas as pd
@@ -22,7 +23,7 @@ from util.utils import get_latest_sim
 def load_simulation_data(filepath):
     """Load the sim data from a pickle file"""
 
-    print(f"Loading simulation data from: {filepath}")
+    logging.info(f"Loading simulation data from: {filepath}")
     
     with open(filepath, 'rb') as file:
         df = pickle.load(file)
@@ -30,8 +31,8 @@ def load_simulation_data(filepath):
     if isinstance(df, pd.Series):
         df = df.to_frame().T
     
-    print(f"Loaded DataFrame with shape: {df.shape}")
-    
+    logging.info(f"Loaded DataFrame with shape: {df.shape}")
+
     return df
 
 def calculate_node_color(wallet, currency_1, currency_2):
@@ -233,18 +234,17 @@ def load_data_and_prepare_layouts():
     num_timesteps = len(df) - 1
     currency_pairs = get_currency_pairs(df)
 
-    print("Data loaded and networks created")
+    logging.info("Data loaded and networks created")
 
+    logging.info("Pre-calculating layouts...")
 
-    print("Pre-calculating layouts...")
-
-    print("Pre-calculating force-directed layouts...")
+    logging.info("Pre-calculating force-directed layouts...")
     force_layouts = pre_calculate_force_layouts(networks)
 
-    print("Pre-calculating centrality-based layouts...")
+    logging.info("Pre-calculating centrality-based layouts...")
     centrality_layouts = pre_calculate_centrality_layouts(networks)
 
-    print("Layouts pre-calculated")
+    logging.info("Layouts pre-calculated")
 
     return df, networks, num_timesteps, currency_pairs, force_layouts, centrality_layouts
 
@@ -494,13 +494,26 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
     return app
 
 if __name__ == '__main__':
+
+    ## setup logging
+    logging.basicConfig(level=logging.DEBUG, 
+                        filename='passing.log',
+                        filemode='w', 
+                        format='[%(asctime)s] [%(levelname)s] [%(filename)s] %(message)s', 
+                        datefmt='%Y-%m-%d %H:%M:%S')
+
+    console = logging.StreamHandler()
+    console.setLevel(logging.INFO)
+    formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] [%(filename)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+    console.setFormatter(formatter)
+    logging.getLogger('').addHandler(console)
+
     multiprocessing.freeze_support()
 
-    print("Loading data and preparing layouts...")
     df, networks, num_timesteps, currency_pairs, force_layouts, centrality_layouts = load_data_and_prepare_layouts()
 
-    print("Creating Dash app...")
+    logging.info("Creating Dash app...")
     app = create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, centrality_layouts)
 
-    print("Running the app...")
+    logging.info("Running Dash app...")
     app.run(debug=True, port=8050)
