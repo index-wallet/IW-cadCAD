@@ -136,7 +136,13 @@ def create_network_trace(G, layout='grid', pos=None, currency_1=0, currency_2=1)
                 title=f"Ratio of Currency {currency_1+1} to {currency_2+1}",
                 tickmode='array',
                 tickvals=[0, 0.25, 0.5, 0.75, 1],
-                ticktext=['0 (All Currency 1)', '0.25', '0.5 (Equal)', '0.75', '1 (All Currency 2)']
+                ticktext=[
+                    f'0 (All Currency {currency_1+1})', 
+                    '0.25', 
+                    '0.5 (Equal)', 
+                    '0.75', 
+                    f'1 (All Currency {currency_2+1})'
+                ]
             )
         ),
         text=hover_texts,
@@ -181,6 +187,7 @@ def create_improved_centrality_layout(G, k=0.1, iterations=50):
     """Create an improved centrality-based layout with reduced overlap and centered mass"""
     
     ## We're doing magic math here, because this can take a while
+    ## Still overlaps a toooon, but it's betterish.
     centrality = nx.degree_centrality(G)
     nodes = list(G.nodes())
     n = len(nodes)
@@ -352,16 +359,25 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
         G = networks[time_step]
         
         currency_1, currency_2 = map(int, currency_pair.split(','))
-        
-        fig = make_subplots(rows=2, cols=2, 
+            
+        fig = make_subplots(rows=3, cols=2, 
                             column_widths=[0.7, 0.3],
-                            row_heights=[0.7, 0.3],
-                            specs=[[{"type": "scatter", "rowspan": 2}, {"type": "scatter"}],
-                                [None, {"type": "scatter"}]],
-                            vertical_spacing=0.08,
-                            horizontal_spacing=0.08,
-                            subplot_titles=["", f"Currency {currency_1+1} vs Currency {currency_2+1} Assessments (Step {time_step})", ""])
+                            row_heights=[0.33, 0.33, 0.33],
+                            specs=[
+                                [{"type": "scatter", "rowspan": 3}, {"type": "scatter"}],
+                                [None, {"type": "scatter"}],
+                                [None, {"type": "scatter"}]
+                            ],
+                            vertical_spacing=0.12,
+                            horizontal_spacing=0.08, 
+                            subplot_titles=[
+                                "", 
+                                f"Currency {currency_1+1} vs {currency_2+1} Assessments",
+                                "New Graph (Click Placeholder)",
+                                "Total Wallet Amount Over Time"
+                            ])
         
+        ## Network graph (left side, full height)
         if layout == 'force':
             edge_trace, node_trace, node_colors = create_network_trace(G, layout='force', pos=force_layouts[time_step], currency_1=currency_1, currency_2=currency_2)
         elif layout == 'centrality':
@@ -372,6 +388,7 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
         fig.add_trace(edge_trace, row=1, col=1)
         fig.add_trace(node_trace, row=1, col=1)
         
+        ## Currency scatter plot (top right)
         scatter_x = [G.nodes[node]['pricing_assessment'][currency_1] for node in G.nodes()]
         scatter_y = [G.nodes[node]['pricing_assessment'][currency_2] for node in G.nodes()]
         
@@ -398,6 +415,10 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
         )
         fig.add_trace(scatter_trace, row=1, col=2)
         
+        ## Node Click graph (middle right) - placeholder
+        fig.add_trace(go.Scatter(x=[0], y=[0], mode='markers'), row=2, col=2)
+        
+        ## Wallet amount line graph (bottom right)
         wallet_data = {}
         for t in range(time_step + 1):
             for node in networks[t].nodes():
@@ -423,7 +444,7 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
                 text=[f"Node: {node}<br>Time Step: {t}<br>Total Wallet: {v:.4f}" for t, v in enumerate(values)],
                 showlegend=False
             )
-            fig.add_trace(wallet_trace, row=2, col=2)
+            fig.add_trace(wallet_trace, row=3, col=2)
         
         avg_asmt = calc_average_valuations(df.iloc[time_step])
         
@@ -435,7 +456,7 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
             showlegend=False,
             hovermode='closest',
             height=800,
-            margin=dict(l=20, r=20, t=50, b=20),
+            margin=dict(l=20, r=20, t=60, b=20),
             plot_bgcolor='rgba(227, 234, 255, 0.8)',
             paper_bgcolor='white'
         )
@@ -444,26 +465,35 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
         fig.update_yaxes(showgrid=False, zeroline=False, showticklabels=False, row=1, col=1)
         
         fig.update_xaxes(title_text=f"Currency {currency_1+1} Assessment", row=1, col=2, 
-                        type="log", 
-                        exponentformat="power",
-                        showexponent="all")
-        fig.update_yaxes(title_text=f"Currency {currency_2+1} Assessment", row=1, col=2, 
-                        type="log", 
-                        exponentformat="power",
-                        showexponent="all")
+                        type="log", exponentformat="power", showexponent="all",
+                        title_standoff=2, tickangle=45)
+        fig.update_yaxes(title_text=f"Currency {currency_2+1}<br>Assessment", row=1, col=2, 
+                        type="log", exponentformat="power", showexponent="all",
+                        title_standoff=2)
         
-        fig.update_xaxes(title_text="Time Step", row=2, col=2, 
-                        range=[0, num_timesteps],
-                        dtick=10)
+        fig.update_xaxes(title_text="Placeholder X", row=2, col=2, title_standoff=2, tickangle=45)
+        fig.update_yaxes(title_text="Placeholder Y", row=2, col=2, title_standoff=2)
+        
+        fig.update_xaxes(title_text="Time Step", row=3, col=2, 
+                        range=[0, num_timesteps], dtick=10,
+                        title_standoff=2, tickangle=45)
         
         all_wallet_values = [value for values in wallet_data.values() for value in values]
         min_wallet, max_wallet = min(all_wallet_values), max(all_wallet_values)
-        fig.update_yaxes(title_text="Total Wallet Value", row=2, col=2, 
-                        type="log",
-                        exponentformat="power",
-                        showexponent="all",
-                        range=[safe_log10(min_wallet*0.9), safe_log10(max_wallet*1.1)])
+        fig.update_yaxes(title_text="Total Wallet<br>Value", row=3, col=2, 
+                        type="log", exponentformat="power", showexponent="all",
+                        range=[safe_log10(min_wallet*0.9), safe_log10(max_wallet*1.1)],
+                        title_standoff=2)
         
+        fig.update_layout(
+            font=dict(size=9),
+            xaxis_title_font=dict(size=9),
+            yaxis_title_font=dict(size=9)
+        )
+        
+        for i in range(len(fig.layout.annotations)):
+            fig.layout.annotations[i].text += f" (Step {time_step})"
+
         return fig
 
     @app.callback(
@@ -485,6 +515,7 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
          State('interval-component', 'disabled')]
     )
     def update_slider(n, current_value, max_value, is_disabled):
+        """Update the time slider value"""
         if is_disabled:
             raise PreventUpdate
         if current_value >= max_value:
@@ -496,11 +527,15 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
         [Input('network-graph', 'clickData')]
     )
     def display_click_data(clickData):
+        """Display the data of a clicked node"""
         if clickData is None:
-            return "Click on a node to see its details"
+            return "Click on a node to see its details."
         else:
-            point = clickData['points'][0]
-            return f"Clicked on node: {point['text'].split('<br>')[0]}"
+            try:
+                point = clickData['points'][0]
+                return f"Clicked on node: {point['text'].split('<br>')[0]}."
+            except:
+                return "Something went wrong, try clicking on a node again."
 
     return app
 
