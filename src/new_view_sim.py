@@ -446,15 +446,20 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
                 
                 click_traces = [
                     go.Scatter(x=time_steps, y=wallet_data[0], mode='lines', name='Wallet Currency 1',
-                            hoverinfo='text', hovertext=[f'Time Step: {t}<br>Wallet Currency 1: {v:.4f}' for t, v in zip(time_steps, wallet_data[0])]),
+                            hoverinfo='text', hovertext=[f'Time Step: {t}<br>Wallet Currency 1: {v:.4f}' for t, v in zip(time_steps, wallet_data[0])],
+                            hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black")),
                     go.Scatter(x=time_steps, y=wallet_data[1], mode='lines', name='Wallet Currency 2',
-                            hoverinfo='text', hovertext=[f'Time Step: {t}<br>Wallet Currency 2: {v:.4f}' for t, v in zip(time_steps, wallet_data[1])]),
+                            hoverinfo='text', hovertext=[f'Time Step: {t}<br>Wallet Currency 2: {v:.4f}' for t, v in zip(time_steps, wallet_data[1])],
+                            hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black")),
                     go.Scatter(x=time_steps, y=currency_valuation_data[0], mode='lines', name='Currency Valuation 1',
-                            hoverinfo='text', hovertext=[f'Time Step: {t}<br>Currency Valuation 1: {v:.4f}' for t, v in zip(time_steps, currency_valuation_data[0])]),
+                            hoverinfo='text', hovertext=[f'Time Step: {t}<br>Currency Valuation 1: {v:.4f}' for t, v in zip(time_steps, currency_valuation_data[0])],
+                            hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black")),
                     go.Scatter(x=time_steps, y=currency_valuation_data[1], mode='lines', name='Currency Valuation 2',
-                            hoverinfo='text', hovertext=[f'Time Step: {t}<br>Currency Valuation 2: {v:.4f}' for t, v in zip(time_steps, currency_valuation_data[1])]),
+                            hoverinfo='text', hovertext=[f'Time Step: {t}<br>Currency Valuation 2: {v:.4f}' for t, v in zip(time_steps, currency_valuation_data[1])],
+                            hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black")),
                     go.Scatter(x=time_steps, y=price_data, mode='lines', name='Price',
-                            hoverinfo='text', hovertext=[f'Time Step: {t}<br>Price: {v:.4f}' for t, v in zip(time_steps, price_data)])
+                            hoverinfo='text', hovertext=[f'Time Step: {t}<br>Price: {v:.4f}' for t, v in zip(time_steps, price_data)],
+                            hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black"))
                 ]
                 
                 for trace in click_traces:
