@@ -1,5 +1,8 @@
 __pycache__
 .venv
+/venv
 
 sim_results*
 fig
+
+.vscode/

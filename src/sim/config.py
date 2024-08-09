@@ -56,7 +56,7 @@ def compute_pricing_assessment(
             for node in grid
         }
 
-    print(f"Starting optimization, timestep{state["timestep"]}")
+    print(f"Starting optimization, timestep{state['timestep']}")
 
     # Shuffle to ensure random order
     nodes = [node for node in grid.nodes()]

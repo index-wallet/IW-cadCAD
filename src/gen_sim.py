@@ -3,10 +3,11 @@ import pandas as pd
 import pickle
 from datetime import datetime
 import os
-import subprocess
 
 from sim.config import exp
+from util.utils import get_latest_commit_hash
 
+# Pretty sure this just overrides value with None, gonna leave it for now
 conf_file: str | None = (
     "sim_results/99f8fb74a11cbfcf345671cf823f6af5ef1700c9/2024-06-27 14:32:14.sim"
 )
@@ -25,26 +26,17 @@ run = Executor(
 (system_events, tensor_field, sessions) = run.execute()
 df = pd.DataFrame(system_events)
 
-try:
-    result = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    commit_hash = result.stdout.decode("utf-8").strip()
-except subprocess.CalledProcessError as e:
-    print(f"An error occurred: {e.stderr.decode('utf-8')}")
-    commit_hash = "no_repo_found"
+commit_hash = get_latest_commit_hash()
 
 save_dir: str = f"sim_results/{commit_hash}"
 os.makedirs(save_dir, exist_ok=True)
 
-now = datetime.now()
-timestamp = now.strftime("%Y-%m-%d %H:%M:%S")
+# Windows doesn't like colons in filenames
+timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-picklefile = open(f"{save_dir}/{timestamp}.sim", "wb")
-if conf_file is not None:
-    picklefile = open(conf_file.replace(".sim", ".sim-fork"), "wb")
-
-pickle.dump(df, picklefile)
+with open(f"{save_dir}/{timestamp}.sim", "wb") as picklefile:
+    if conf_file is not None:
+        with open(conf_file.replace(".sim", ".sim-fork"), "wb") as forkfile:
+            pickle.dump(df, forkfile)
+    else:
+        pickle.dump(df, picklefile)
