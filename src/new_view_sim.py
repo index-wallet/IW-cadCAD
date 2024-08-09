@@ -2,6 +2,7 @@
 from itertools import combinations
 import pickle
 import multiprocessing
+import random
 import logging
 
 ## third-party
@@ -358,7 +359,17 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
     Input('network-graph', 'clickData')]
     )
     def update_graph(time_step, layout, currency_pair, clickData):
+        
+        random.seed(42)
+
         G = networks[time_step]
+        
+
+        if clickData:
+            node = eval(clickData['points'][0]['text'].split('<br>')[0].split(': ')[1])
+        else:
+            ## Use the same random node for all time steps until we have one selected
+            node = random.choice(list(G.nodes()))
         
         currency_1, currency_2 = map(int, currency_pair.split(','))
             
@@ -375,12 +386,11 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
                             subplot_titles=[
                                 "", 
                                 f"Currency {currency_1+1} vs {currency_2+1} Assessments",
-                                ## Middle graph here kept as blank if i can figure out to update the title once node is clicked (should be possible)
-                                "",
+                                f"Node Metrics for Node {node}",
                                 "Total Wallet Amount Over Time"
                             ])
         
-        ## Network graph (left side, full height)
+        # Network graph (left side, full height)
         if layout == 'force':
             edge_trace, node_trace, node_colors = create_network_trace(G, layout='force', pos=force_layouts[time_step], currency_1=currency_1, currency_2=currency_2)
         elif layout == 'centrality':
@@ -418,96 +428,46 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
         )
         fig.add_trace(scatter_trace, row=1, col=2)
         
-        ## Node Click graph (middle right)
-        click_data_text = "Click on a node to see its details."
-
-        if clickData:
-            try:
-                point = clickData['points'][0]
-                node = eval(point['text'].split('<br>')[0].split(': ')[1])
-                
-                wallet_data = {0: [], 1: []}
-                currency_valuation_data = {0: [], 1: []}
-                price_data = []
-                time_steps = list(range(time_step + 1))
-                
-                for t in time_steps:
-                    node_data = networks[t].nodes[node]
-                    
-                    wallet = node_data['wallet']
-                    wallet_data[0].append(wallet[0])
-                    wallet_data[1].append(wallet[1])
-                    
-                    currency_valuation = node_data['inherited_assessment']
-                    currency_valuation_data[0].append(currency_valuation[0])
-                    currency_valuation_data[1].append(currency_valuation[1])
-                    
-                    price_data.append(node_data['price'])
-                
-                click_traces = [
-                    go.Scatter(x=time_steps, y=wallet_data[0], mode='lines', name='Wallet Currency 1',
-                            hoverinfo='text', hovertext=[f'Time Step: {t}<br>Wallet Currency 1: {v:.4f}' for t, v in zip(time_steps, wallet_data[0])],
-                            hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black")),
-                    go.Scatter(x=time_steps, y=wallet_data[1], mode='lines', name='Wallet Currency 2',
-                            hoverinfo='text', hovertext=[f'Time Step: {t}<br>Wallet Currency 2: {v:.4f}' for t, v in zip(time_steps, wallet_data[1])],
-                            hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black")),
-                    go.Scatter(x=time_steps, y=currency_valuation_data[0], mode='lines', name='Currency Valuation 1',
-                            hoverinfo='text', hovertext=[f'Time Step: {t}<br>Currency Valuation 1: {v:.4f}' for t, v in zip(time_steps, currency_valuation_data[0])],
-                            hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black")),
-                    go.Scatter(x=time_steps, y=currency_valuation_data[1], mode='lines', name='Currency Valuation 2',
-                            hoverinfo='text', hovertext=[f'Time Step: {t}<br>Currency Valuation 2: {v:.4f}' for t, v in zip(time_steps, currency_valuation_data[1])],
-                            hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black")),
-                    go.Scatter(x=time_steps, y=price_data, mode='lines', name='Price',
-                            hoverinfo='text', hovertext=[f'Time Step: {t}<br>Price: {v:.4f}' for t, v in zip(time_steps, price_data)],
-                            hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black"))
-                ]
-                
-                for trace in click_traces:
-                    fig.add_trace(trace, row=2, col=2)
-                
-                title = f"Node Metrics for Node {node}"
-
-                ## This doesn't work, but it should (to update the title when a node is clicked)
-                fig.update_layout(
-                    title=dict(
-                        text=title,
-                        font=dict(size=24)
-                    ),
-                    showlegend=False,
-                    hovermode='closest',
-                    height=800,
-                    margin=dict(l=20, r=20, t=80, b=20),
-                    plot_bgcolor='rgba(227, 234, 255, 0.8)',
-                    paper_bgcolor='white'
-                )
-                
-                ## Update axes for the node metrics graph, works fine
-                fig.update_xaxes(title_text="Time Step", row=2, col=2, title_standoff=2, tickangle=45)
-                fig.update_yaxes(title_text="Value (Log Scale)", row=2, col=2, title_standoff=2, type="log")
-                
-                click_data_text = [f"Data for Node: {node}"]
-                for i, category in enumerate(['Wallet Currency 1', 'Wallet Currency 2', 'Currency Valuation 1', 'Currency Valuation 2', 'Price']):
-                    click_data_text.append(f"\n{category}:")
-                    click_data_text.extend([f"{t},{v:.4f}" for t, v in zip(time_steps, click_traces[i].y)])
-                click_data_text = "\n".join(click_data_text)
+        ## Node metrics graph (middle right)
+        wallet_data = {0: [], 1: []}
+        currency_valuation_data = {0: [], 1: []}
+        price_data = []
+        time_steps = list(range(time_step + 1))
+        
+        for t in time_steps:
+            node_data = networks[t].nodes[node]
             
-            except Exception as e:
-                click_data_text = f"An error occurred: {str(e)}"
-        else:
-            ## Hide the subplot when no node is clicked
-            fig.update_xaxes(title_text="", showticklabels=False, showgrid=False, row=2, col=2)
-            fig.update_yaxes(title_text="", showticklabels=False, showgrid=False, row=2, col=2)
-
-        ## Set hover template for better visibility in the node metrics graph
-        fig.update_traces(
-            hovertemplate='<b>%{hovertext}</b>',
-            hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial"),
-            selector=dict(row=2, col=2)
-        )
-
-        fig.update_xaxes(title_text="Time Step", row=2, col=2, title_standoff=2, tickangle=45)
-        fig.update_yaxes(title_text="Value (Log Scale)", row=2, col=2, title_standoff=2, type="log")
-
+            wallet = node_data['wallet']
+            wallet_data[0].append(wallet[0])
+            wallet_data[1].append(wallet[1])
+            
+            currency_valuation = node_data['inherited_assessment']
+            currency_valuation_data[0].append(currency_valuation[0])
+            currency_valuation_data[1].append(currency_valuation[1])
+            
+            price_data.append(node_data['price'])
+        
+        click_traces = [
+            go.Scatter(x=time_steps, y=wallet_data[0], mode='lines', name='Wallet Currency 1',
+                    hoverinfo='text', hovertext=[f'Time Step: {t}<br>Wallet Currency 1: {v:.4f}' for t, v in zip(time_steps, wallet_data[0])],
+                    hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black")),
+            go.Scatter(x=time_steps, y=wallet_data[1], mode='lines', name='Wallet Currency 2',
+                    hoverinfo='text', hovertext=[f'Time Step: {t}<br>Wallet Currency 2: {v:.4f}' for t, v in zip(time_steps, wallet_data[1])],
+                    hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black")),
+            go.Scatter(x=time_steps, y=currency_valuation_data[0], mode='lines', name='Currency Valuation 1',
+                    hoverinfo='text', hovertext=[f'Time Step: {t}<br>Currency Valuation 1: {v:.4f}' for t, v in zip(time_steps, currency_valuation_data[0])],
+                    hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black")),
+            go.Scatter(x=time_steps, y=currency_valuation_data[1], mode='lines', name='Currency Valuation 2',
+                    hoverinfo='text', hovertext=[f'Time Step: {t}<br>Currency Valuation 2: {v:.4f}' for t, v in zip(time_steps, currency_valuation_data[1])],
+                    hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black")),
+            go.Scatter(x=time_steps, y=price_data, mode='lines', name='Price',
+                    hoverinfo='text', hovertext=[f'Time Step: {t}<br>Price: {v:.4f}' for t, v in zip(time_steps, price_data)],
+                    hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black"))
+        ]
+        
+        for trace in click_traces:
+            fig.add_trace(trace, row=2, col=2)
+        
         ## Wallet amount line graph (bottom right)
         wallet_data = {}
         for t in range(time_step + 1):
@@ -584,22 +544,25 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
             yaxis_title_font=dict(size=9)
         )
         
-        ## This could be the cause for not being able to update the title when a node is clicked, will check later
         for i in range(len(fig.layout.annotations)):
-            if i != 2:  ## Skip the node metrics subplot title
-                fig.layout.annotations[i].text += f" (Step {time_step})"
+            fig.layout.annotations[i].text += f" (Step {time_step})"
 
         for row in range(1, 4):
             for col in range(1, 3):
                 fig.update_xaxes(title_font=dict(size=14), row=row, col=col)
                 fig.update_yaxes(title_font=dict(size=14), row=row, col=col)
 
-        ## Set hover template for better visibility in the node metrics graph
+        # Set hover template for better visibility in the node metrics graph
         fig.update_traces(
             hovertemplate='<b>%{hovertext}</b>',
             hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial"),
             selector=dict(row=2, col=2)
         )
+
+        click_data_text = f"Data for Node: {node}"
+        for i, category in enumerate(['Wallet Currency 1', 'Wallet Currency 2', 'Currency Valuation 1', 'Currency Valuation 2', 'Price']):
+            click_data_text += f"\n{category}:"
+            click_data_text += "\n" + "\n".join([f"{t},{v:.4f}" for t, v in zip(time_steps, click_traces[i].y)])
 
         return fig, click_data_text
 
