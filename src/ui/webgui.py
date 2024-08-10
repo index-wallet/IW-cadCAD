@@ -87,7 +87,7 @@ def safe_log10(x):
     """Return the log10 of x, but return -10 if x is 0"""
     return np.log10(max(abs(x), 1e-10))
 
-def create_network_trace(G, layout='grid', pos=None, currency_1=0, currency_2=1):
+def create_network_trace(G, layout='grid', pos=None, currency_1=0, currency_2=1, selected_node=None):
     """Create plotly traces for the networkx graph"""
 
     if layout == 'grid':
@@ -170,7 +170,24 @@ def create_network_trace(G, layout='grid', pos=None, currency_1=0, currency_2=1)
         mode='lines'
     )
 
-    return edge_trace, node_trace, node_colors
+    selected_circle = None
+    if selected_node is not None:
+        selected_x, selected_y = pos[selected_node]
+        selected_size = node_sizes[list(G.nodes()).index(selected_node)]
+        selected_circle = go.Scatter(
+            x=[selected_x],
+            y=[selected_y],
+            mode='markers',
+            marker=dict(
+                size=selected_size * 1.5,
+                color='rgba(0,0,0,0)', 
+                line=dict(color='red', width=2)
+            ),
+            hoverinfo='none',
+            showlegend=False
+        )
+
+    return edge_trace, node_trace, node_colors, selected_circle
 
 def calc_average_valuations(row):
     """Calculate the average valuation of all nodes in a row"""
@@ -182,16 +199,21 @@ def calc_average_valuations(row):
     return valuation
 
 def pre_calculate_force_layouts(networks):
-    """Pre-calculate force-directed layouts for all networks"""
+    """Pre-calculate force-directed layouts for all networks using a fixed seed"""
+    random.seed(42)
+    np.random.seed(42) 
+
     force_layouts = []
     for G in networks:
-        pos = nx.spring_layout(G, k=1/np.sqrt(len(G.nodes())), iterations=50)
+        pos = nx.spring_layout(G, k=1/np.sqrt(len(G.nodes())), iterations=50, seed=42)
         force_layouts.append(pos)
     return force_layouts
 
 def create_improved_centrality_layout(G, k=0.1, iterations=50):
     """Create an improved centrality-based layout with reduced overlap and centered mass"""
-    
+    random.seed(42)
+    np.random.seed(42) 
+
     ## We're doing magic math here, because this can take a while
     ## Still overlaps a toooon, but it's betterish.
     centrality = nx.degree_centrality(G)
@@ -266,6 +288,44 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
 
     num_currencies = len(df.iloc[0]['grid'].nodes[list(df.iloc[0]['grid'].nodes)[0]]['agent'].wallet)
 
+def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, centrality_layouts):
+    app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+    num_currencies = len(df.iloc[0]['grid'].nodes[list(df.iloc[0]['grid'].nodes)[0]]['agent'].wallet)
+
+    ## Custom CSS for upward expanding dropdown
+    app.index_string = '''
+    <!DOCTYPE html>
+    <html>
+        <head>
+            {%metas%}
+            <title>{%title%}</title>
+            {%favicon%}
+            {%css%}
+            <style>
+                #attribute-dropdown .Select-menu-outer {
+                    top: auto !important;
+                    bottom: 100% !important;
+                    border-bottom-left-radius: 0px !important;
+                    border-bottom-right-radius: 0px !important;
+                    border-top-left-radius: 4px !important;
+                    border-top-right-radius: 4px !important;
+                }
+                #attribute-dropdown .Select-menu {
+                    max-height: 300px !important;
+                }
+            </style>
+        </head>
+        <body>
+            {%app_entry%}
+            <footer>
+                {%config%}
+                {%scripts%}
+                {%renderer%}
+            </footer>
+        </body>
+    </html>
+    '''
+
     app.layout = html.Div([
         html.Div([
             html.Div([
@@ -289,22 +349,7 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
                     clearable=False,
                     searchable=False,
                     style={
-                        'width': '100%', 
-                        'marginTop': '10px',
-                        'fontSize': '12px'
-                    }
-                ),
-                dcc.Dropdown(
-                    id='attribute-dropdown',
-                    options=[{'label': 'All', 'value': 'all'},
-                             {'label': 'Price', 'value': 'price'}] +
-                            [{'label': f'Currency Valuation {i+1}', 'value': f'currency_valuation_{i}'} for i in range(num_currencies)] +
-                            [{'label': f'Wallet Currency {i+1}', 'value': f'wallet_currency_{i}'} for i in range(num_currencies)],
-                    value='all',
-                    clearable=False,
-                    searchable=False,
-                    style={
-                        'width': '100%', 
+                        'width': '100%',
                         'marginTop': '10px',
                         'fontSize': '12px'
                     }
@@ -312,7 +357,24 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
             ], style={'width': '200px', 'position': 'absolute', 'left': '10px', 'top': '50px', 'zIndex': '1000'}),
             dcc.Graph(id='network-graph', style={'height': '80vh', 'width': 'calc(100% - 220px)', 'marginLeft': '220px'}),
         ], style={'position': 'relative', 'height': '80vh'}),
-        
+       
+        html.Div([
+            dcc.Dropdown(
+                id='attribute-dropdown',
+                options=[{'label': 'All', 'value': 'all'},
+                        {'label': 'Price', 'value': 'price'}] +
+                        [{'label': f'Currency Valuation {i+1}', 'value': f'currency_valuation_{i}'} for i in range(num_currencies)] +
+                        [{'label': f'Wallet Currency {i+1}', 'value': f'wallet_currency_{i}'} for i in range(num_currencies)],
+                value='all',
+                clearable=False,
+                searchable=False,
+                style={
+                    'width': '200px',
+                    'fontSize': '12px'
+                }
+            ),
+        ], style={'position': 'absolute', 'right': '85px', 'top': 'calc(80vh + 25px)'}),
+       
         html.Div([
             dcc.Slider(
                 id='time-slider',
@@ -323,8 +385,8 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
                 marks={i: {'label': str(i)} for i in range(0, num_timesteps + 1, 5)},
                 tooltip={"placement": "bottom", "always_visible": True}
             ),
-        ], style={'width': '95%', 'margin': '20px auto', 'paddingTop': '20px'}),
-        
+        ], style={'width': '95%', 'margin': '60px auto 20px auto', 'paddingTop': '20px'}),
+       
         dcc.Interval(
             id='interval-component',
             interval=1000,
@@ -333,43 +395,6 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
         ),
     ])
 
-    app.index_string = '''
-<!DOCTYPE html>
-<html>
-    <head>
-        {%metas%}
-        <title>{%title%}</title>
-        {%favicon%}
-        {%css%}
-        <style>
-            .rc-slider-track {
-                background-color: #007bff;
-            }
-            .rc-slider-handle {
-                border-color: #007bff;
-                background-color: #007bff;
-            }
-            .rc-slider-handle:hover {
-                border-color: #0056b3;
-            }
-            .rc-slider-handle-active:active {
-                border-color: #0056b3;
-            }
-            .rc-slider-mark-text {
-                color: #495057;
-            }
-        </style>
-    </head>
-    <body>
-        {%app_entry%}
-        <footer>
-            {%config%}
-            {%scripts%}
-            {%renderer%}
-        </footer>
-    </body>
-</html>
-'''
     @app.callback(
     Output('network-graph', 'figure'),
     [Input('time-slider', 'value'),
@@ -379,15 +404,17 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
     Input('network-graph', 'clickData')]
     )
     def update_graph(time_step, layout, currency_pair, selected_attribute, clickData):
-
         G = networks[time_step]
 
         if clickData:
-            node = eval(clickData['points'][0]['text'].split('<br>')[0].split(': ')[1])
+            try:
+                selected_node = eval(clickData['points'][0]['text'].split('<br>')[0].split(': ')[1])
+            except:
+                selected_node = None
         else:
             ## Use the same random node for all time steps until we have one selected
             random.seed(42)
-            node = random.choice(list(G.nodes()))
+            selected_node = random.choice(list(G.nodes()))
         
         currency_1, currency_2 = map(int, currency_pair.split(','))
             
@@ -404,20 +431,37 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
                             subplot_titles=[
                                 "", 
                                 f"Currency {currency_1+1} vs {currency_2+1} Assessments",
-                                f"Node Metrics for Node {node}",
+                                f"Node Metrics for Node {selected_node}",
                                 "Total Wallet Amount Over Time"
                             ])
         
         ## Network graph (left side, full height)
         if layout == 'force':
-            edge_trace, node_trace, node_colors = create_network_trace(G, layout='force', pos=force_layouts[time_step], currency_1=currency_1, currency_2=currency_2)
+            edge_trace, node_trace, node_colors, selected_circle = create_network_trace(G, layout='force', pos=force_layouts[time_step], currency_1=currency_1, currency_2=currency_2, selected_node=selected_node)
         elif layout == 'centrality':
-            edge_trace, node_trace, node_colors = create_network_trace(G, layout='force', pos=centrality_layouts[time_step], currency_1=currency_1, currency_2=currency_2)
+            edge_trace, node_trace, node_colors, selected_circle = create_network_trace(G, layout='force', pos=centrality_layouts[time_step], currency_1=currency_1, currency_2=currency_2, selected_node=selected_node)
         else:
-            edge_trace, node_trace, node_colors = create_network_trace(G, layout='grid', currency_1=currency_1, currency_2=currency_2)
+            edge_trace, node_trace, node_colors, selected_circle = create_network_trace(G, layout='grid', currency_1=currency_1, currency_2=currency_2, selected_node=selected_node)
         
         fig.add_trace(edge_trace, row=1, col=1)
         fig.add_trace(node_trace, row=1, col=1)
+        if selected_circle:
+            fig.add_trace(selected_circle, row=1, col=1)
+
+        if layout == 'grid':
+            grid_size = int(np.sqrt(len(G.nodes())))
+            x_range = [-0.5, grid_size - 0.5]
+            y_range = [-0.5, grid_size - 0.5]
+        else:  ## For force-directed and centrality-based layouts
+            x_coords = node_trace.x
+            y_coords = node_trace.y
+            x_min, x_max = min(x_coords), max(x_coords)
+            y_min, y_max = min(y_coords), max(y_coords)
+            x_range = [x_min - 0.1 * (x_max - x_min), x_max + 0.1 * (x_max - x_min)]
+            y_range = [y_min - 0.1 * (y_max - y_min), y_max + 0.1 * (y_max - y_min)]
+
+        fig.update_xaxes(range=x_range, row=1, col=1)
+        fig.update_yaxes(range=y_range, row=1, col=1)
         
         ## Currency scatter plot (top right)
         scatter_x = [G.nodes[node]['pricing_assessment'][currency_1] for node in G.nodes()]
@@ -441,14 +485,14 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
         fig.add_trace(scatter_trace, row=1, col=2)
         
         ## Node metrics graph (middle right)
-        num_currencies = len(G.nodes[node]['wallet'])
+        num_currencies = len(G.nodes[selected_node]['wallet'])
         wallet_data = {i: [] for i in range(num_currencies)}
         currency_valuation_data = {i: [] for i in range(num_currencies)}
         price_data = []
         time_steps = list(range(time_step + 1))
         
         for t in time_steps:
-            node_data = networks[t].nodes[node]
+            node_data = networks[t].nodes[selected_node]
             
             wallet = node_data['wallet']
             for i in range(num_currencies):
@@ -539,10 +583,10 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
         
         fig.update_xaxes(showgrid=False, zeroline=False, showticklabels=False, row=1, col=1)
         fig.update_yaxes(showgrid=False, zeroline=False, showticklabels=False, row=1, col=1)
-        
+
         fig.update_xaxes(title_text=f"Currency {currency_1+1} Assessment", row=1, col=2, 
-                        type="log", exponentformat="power", showexponent="all",
-                        title_standoff=2)
+                            type="log", exponentformat="power", showexponent="all",
+                            title_standoff=2)
         fig.update_yaxes(title_text=f"Currency {currency_2+1}<br>Assessment", row=1, col=2, 
                         type="log", exponentformat="power", showexponent="all",
                         title_standoff=2)
