@@ -329,7 +329,6 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
     app.layout = html.Div([
         html.Div([
             html.Div([
-                dbc.Button('Play/Pause', id='play-pause-button', n_clicks=0, color="primary", className="mb-2 w-100"),
                 dcc.Dropdown(
                     id='layout-toggle',
                     options=[
@@ -376,6 +375,9 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
         ], style={'position': 'absolute', 'right': '85px', 'top': 'calc(80vh + 25px)'}),
        
         html.Div([
+            html.Div([
+                dbc.Button('Play/Pause', id='play-pause-button', n_clicks=0, color="primary", className="mb-2", style={'width': '120px'}),
+            ], style={'position': 'absolute', 'left': '10px', 'top': '-40px'}),
             dcc.Slider(
                 id='time-slider',
                 min=0,
@@ -385,11 +387,11 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
                 marks={i: {'label': str(i)} for i in range(0, num_timesteps + 1, 5)},
                 tooltip={"placement": "bottom", "always_visible": True}
             ),
-        ], style={'width': '95%', 'margin': '60px auto 20px auto', 'paddingTop': '20px'}),
+        ], style={'width': '95%', 'margin': '60px auto 20px auto', 'paddingTop': '20px', 'position': 'relative'}),
        
         dcc.Interval(
             id='interval-component',
-            interval=1000,
+            interval=250,  # Changed to 250 milliseconds (1/4 of a second)
             n_intervals=0,
             disabled=True
         ),
