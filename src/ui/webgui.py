@@ -189,13 +189,13 @@ def create_network_trace(G, layout='grid', pos=None, currency_1=0, currency_2=1,
 
     return edge_trace, node_trace, node_colors, selected_circle
 
-def calc_average_valuations(row):
-    """Calculate the average valuation of all nodes in a row"""
+def calc_average_valuations(row, currency_1, currency_2):
+    """Calculate the average valuation of all nodes in a row for two specified currencies"""
     asmts = row['pricing_assessments']
     valuation = np.array([0.0, 0.0])
     for _, asmt in asmts.items():
-        valuation += asmt
-    valuation /= 100
+        valuation += np.array([asmt[currency_1], asmt[currency_2]])
+    valuation /= len(asmts)
     return valuation
 
 def pre_calculate_force_layouts(networks):
@@ -391,7 +391,7 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
        
         dcc.Interval(
             id='interval-component',
-            interval=250,  # Changed to 250 milliseconds (1/4 of a second)
+            interval=250,
             n_intervals=0,
             disabled=True
         ),
@@ -563,9 +563,8 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
             )
             fig.add_trace(wallet_trace, row=3, col=2)
         
-        avg_asmt = calc_average_valuations(df.iloc[time_step])
-        
-        currency_valuations = [f'Currency {i+1}: {v:.2f}' for i, v in enumerate(avg_asmt)]
+        avg_asmt = calc_average_valuations(df.iloc[time_step], currency_1, currency_2)
+        currency_valuations = [f'Currency {currency_1+1}: {avg_asmt[0]:.2e}', f'Currency {currency_2+1}: {avg_asmt[1]:.2e}']
         title = f"Time Step: {time_step} | Average Valuations: {', '.join(currency_valuations)}"
         
         fig.update_layout(
