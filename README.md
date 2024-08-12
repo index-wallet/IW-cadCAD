@@ -9,7 +9,7 @@ Transactions take place over a grid-based network. Every agent in the grid is bo
 The included `requirements.txt` file gives all of the dependencies required to run this code. They can be quickly installed all at once with the command
 
 ```
-pip install -r requrements.txt
+pip install -r requirements.txt
 ```
 
 I _highly_ recommend using a [venv](https://docs.python.org/3/library/venv.html).
@@ -24,21 +24,11 @@ There are four executable files in this project. None take any command line argu
 
 The object saved in this pickle file is the output of `cadCAD`s simulation execution. This is loosely a `DataFrame` like object, with one row for each timestep simulated. On each row, there is a column for every state and input variable in the simulation. See [cadCAD's demos](https://github.com/cadCAD-org/demos) for more information.
 
-`view_sim.py`: Opens a very simple GUI to show how the valuation of agents changes over the duration of the simulation. For sims with more than 2 currencies, the methods used to display this information will likely need to be modified. There is a known issue where the slider to scroll through time has incorrect bounds. It may crash when attempting to view a timestep that does not exist in the viewed sim file.
+`view_sim.py`: Runs a WebGUI server to show how the simulation changes over time. For sims with more than 2 currencies, you can select which currencies to compare in a dropdown in the top left. You can also select the graph layout (grid, force-directed, and centrality-based (a bit flawed)) in a similar drop down. The play/pause toggle button is in the bottom right near the timeline bar (which can be dragged to change the timestep). Click a node to see more specific node details graphed in the middle subplot, you can customize that graph by using another dropdown below that on the bottom right. The server runs on `localhost:8050` by default. You can view this server in your browser by navigating to that address, or in vscode right clicking the link while pressing `ctrl`.
 
 `data_analysis.py`: Generates figures displaying (hopefully useful) summary information about a sim file. This is done in batches; the file will generate figures for an entire directory at once. Currently, it generates figures to show the amount of money each participant has at every timestep in the simulation, and the initial and final values that agents assign to every currency.
 
 `gen_sim_forks.py`: For some sim file, it creates many new sim files with the same initial state except for a simple perturbation applied. This executable only generates the _initial timestep_ for these sims. By specifying a `conf_file` in `gen_sim.py`, it can be seen how these perturbations evolve through time.
-
-### New Files
-
-`ui/webgui.py` The core of the experimental GUI. This is a more advanced version of `view_sim.py` that uses networkx and plotly to display the simulation. 
-
-`new_view_sim.py` Runs the new GUI. 
-
-Just like the previous sim it is color based on the agent's wallet ratio albeit using a slightly different method and can be changed based of the currencies being compared.
-
-You can click nodes to observe and graph their parameters over time. There are also 2 other subplots, the first comparing the wealth of the agents and the second comparing the valuation of the currencies.
 
 ## Parameters
 
