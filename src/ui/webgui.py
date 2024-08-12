@@ -67,7 +67,8 @@ def create_network_from_grid(row):
                    pricing_assessment=pricing_assessments.get(node, []),
                    wallet=agent.wallet,
                    price=agent.price,
-                   demand=agent.demand)
+                   demand=agent.demand,
+                   type=agent.type)
     
     grid_size = int(np.sqrt(len(grid.nodes)))
     for i in range(grid_size):
@@ -118,7 +119,8 @@ def create_network_trace(G, layout='grid', pos=None, currency_1=0, currency_2=1,
         f"Wallet: {G.nodes[node]['wallet']}<br>"
         f"Currency Valuation: {G.nodes[node]['inherited_assessment']}<br>"
         f"Price: {G.nodes[node]['price']}<br>"
-        f"Demand: {G.nodes[node]['demand']}"
+        f"Demand: {G.nodes[node]['demand']}<br>"
+        F"Type: {G.nodes[node]['type']}"
         for node in G.nodes()
     ]
 
