@@ -20,24 +20,32 @@ from sim.params import (
 
 
 class Agent:
-    def __init__(self, type:Literal["both", "vendor", "customer"] = "both"):
+    def __init__(self, neighbors: List[Tuple[int, int]] | None = None, type: Literal["both", "vendor", "customer"] = "both"):
         ## Type is only used for vendor_customer topology
-        ## All agents are prosumers, this merely dictates who can trade with who 
+        ## All agents are prosumers, this merely dictates who can trade with who
+        ## Neighbors are used for grid topology, I couldn't figure out a way around the hack that used by the original code and messing with it broke things so I left it as is
+        ## But vendor_customer can just do it after the fact 
         self.wallet: npt.NDArray[np.float64] = np.random.rand(num_currencies)
 
         self.price: float = np.random.random() * price_range[1] + price_range[0]
         self.prod_cost = self.price / 10
         self.type = type
+        self.public_good_util_scales = np.zeros(num_currencies)
+        
+        if neighbors is not None:
+            # HACK: this feels hacky, but I can't use agents as keys if I want to construct them all at the same time
+            self.demand: Dict[Tuple[int, int], float] = {
+                neighbor: np.random.random() * demand_range[1] + demand_range[0]
+                for neighbor in neighbors
+            }
+        else:
+            self.demand = {}
 
     def initialize_demand(self, neighbors: List[Tuple[int, int]]):
         self.demand = {
             neighbor: np.random.random() * demand_range[1] + demand_range[0]
             for neighbor in neighbors
         }
-
-        # scalar multiplier for public good benefit
-        # worst case: no one gets any utility from donations
-        self.public_good_util_scales = np.zeros(num_currencies)
 
     def __str__(self) -> str:
         return f"Wallet: {self.wallet}\nPrice: {self.price}\nDemand: {self.demand}\nType: {self.type}"
@@ -52,12 +60,6 @@ def gen_econ_network() -> nx.DiGraph:
     else:
         raise ValueError(f"Unknown topology type: {topology_type}")
     
-    # Initialize demands for each agent based on final graph structure
-    for node in graph.nodes:
-        agent = graph.nodes[node]['agent']
-        neighbors = list(graph.neighbors(node))
-        agent.initialize_demand(neighbors)
-    
     return graph
 
 def get_graph_topology() -> nx.DiGraph:
@@ -67,7 +69,7 @@ def get_graph_topology() -> nx.DiGraph:
     )
 
     # Create agent at each node
-    node_data = {node: {"agent": Agent()} for node in graph}
+    node_data = {node: {"agent": Agent(neighbors=graph[node])} for node in graph}
     nx.set_node_attributes(graph, node_data)
 
     # Dropout
@@ -106,7 +108,7 @@ def get_vendor_customer_topology() -> nx.DiGraph:
     for i in range(total_nodes):
         node = (i // grid_size, i % grid_size)  ## 2d convert
         agent_type = "vendor" if i in vendors else "customer"
-        node_data[node] = {"agent": Agent(agent_type)}
+        node_data[node] = {"agent": Agent(type=agent_type)}
         graph.add_node(node, **node_data[node])
    
     vendor_nodes = [node for node in graph if graph.nodes[node]["agent"].type == "vendor"]
@@ -115,9 +117,15 @@ def get_vendor_customer_topology() -> nx.DiGraph:
     edges = [(v, c) for v in vendor_nodes for c in customer_nodes]
     graph.add_edges_from(edges)
     graph.add_edges_from((c, v) for (v, c) in edges)
+
+    ## Initialize demands for each agent based on final graph structure
+    for node in graph.nodes():
+        neighbors = list(graph.neighbors(node))
+        graph.nodes[node]['agent'].initialize_demand(neighbors)
     
     logging.debug("Created graph with {num_vendors} vendors and {num_customers} customers")
     logging.debug(f"Total edges created: {graph.number_of_edges()}")
+    
     return graph
 
 def gen_random_assessments(graph: nx.DiGraph):

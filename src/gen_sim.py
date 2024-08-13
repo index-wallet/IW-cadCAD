@@ -20,6 +20,7 @@ if is_debug:
     exec_context = ExecutionContext(context=ExecutionMode().single_mode)
 
     ## Setup logging
+    ## This doesn't seem to work at all right now but i'll leave here for now
     logging.basicConfig(level=logging.DEBUG, 
                         format='[%(asctime)s] [%(levelname)s] [%(filename)s] %(message)s', 
                         datefmt='%Y-%m-%d %H:%M:%S')

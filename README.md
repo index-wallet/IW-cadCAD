@@ -50,6 +50,6 @@ The file `src/sim/params.py` contains many parameters that can adjust model exec
 
 `topology_type` If `grid` agents are in a grid connected to their immediate neighbors, max of `4` but at least `1`. If `vendor_customer`, agents are in a "grid", but connections will be formed based of their internal roles as vendors and customers. Vendors connect to customers, and customers connect to vendors, but no self-connections are allowed.
 
-`vendor_customer_ratio`: If `topology_type` is `vendor_customer`, this is the ratio of customers to vendors. Must be at least `1`. If for example `5`, there are 5 customers for every vendor.
+`vendor_customer_ratio`: If `topology_type` is `vendor_customer`, this is the ratio of customers to vendors. Must be at least `1`. If for example `5`, there are 5 customers for every vendor. This is an attempted ratio, so if you only have `9` agents, and `vendor_customer_ratio` is `5`, you will have `1` vendor and `9` customers. The script will tell you if this happens via `logging.warning`
 
-`is_debug`: If `true`, runs the simulation in single core mode and prints out debug information, otherwise runs local mode with no debug information outside of step progress
+`is_debug`: If `true`, runs the simulation in single core mode and "try's to" prints out debug information, otherwise runs local mode with no debug information outside of step progress
