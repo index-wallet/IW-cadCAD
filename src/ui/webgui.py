@@ -54,11 +54,12 @@ def calculate_node_color(wallet, currency_1, currency_2):
 
 def create_network_from_grid(row):
     """Create a networkx graph from the grid data in a row of the DataFrame"""
-    G = nx.Graph()
+    G = nx.DiGraph()
     grid = row['grid']
     best_vendors = row['best_vendors']
     inherited_assessments = row['inherited_assessments']
     pricing_assessments = row['pricing_assessments']
+    edges = row['edges']
     
     for node, agent in grid.nodes.data("agent"):
         G.add_node(node, 
@@ -70,15 +71,10 @@ def create_network_from_grid(row):
                    demand=agent.demand,
                    type=agent.type)
     
-    grid_size = int(np.sqrt(len(grid.nodes)))
-    for i in range(grid_size):
-        for j in range(grid_size):
-            if i < grid_size - 1:
-                G.add_edge((i, j), (i+1, j))
-            if j < grid_size - 1:
-                G.add_edge((i, j), (i, j+1))
+    G.add_edges_from(edges)
     
     return G
+
 
 def create_time_evolving_network(df):
     """Create a list of networkx graphs from the DataFrame"""
@@ -113,16 +109,35 @@ def create_network_trace(G, layout='grid', pos=None, currency_1=0, currency_2=1,
         [1, 'rgb(49,54,149)']    ## Dark blue
     ]
     
+    def format_demand(demand):
+        """Format demand string with line breaks after each full node-value pair"""
+        formatted = str(demand)
+        result = []
+        paren_count = 0
+        for char in formatted:
+            if char == '(':
+                paren_count += 1
+            elif char == ')':
+                paren_count -= 1
+            
+            result.append(char)
+            
+            if paren_count == 0 and char == ',':
+                result.append('<br>')
+        
+        return ''.join(result).rstrip(',<br>') + ')' ## So we don't end with a comma and add the final parenthesis
+
     hover_texts = [
         f"Node: {node}<br>"
         f"Best Vendors: {G.nodes[node]['best_vendors']}<br>"
         f"Wallet: {G.nodes[node]['wallet']}<br>"
         f"Currency Valuation: {G.nodes[node]['inherited_assessment']}<br>"
         f"Price: {G.nodes[node]['price']}<br>"
-        f"Demand: {G.nodes[node]['demand']}<br>"
-        F"Type: {G.nodes[node]['type']}"
+        f"Demand:<br>{format_demand(G.nodes[node]['demand'])}<br>"
+        f"Type: {G.nodes[node]['type']}"
         for node in G.nodes()
     ]
+
 
     edge_x, edge_y = [], []
 
@@ -169,7 +184,12 @@ def create_network_trace(G, layout='grid', pos=None, currency_1=0, currency_2=1,
         x=edge_x, y=edge_y,
         line=dict(width=0.5, color='#888'),
         hoverinfo='none',
-        mode='lines'
+        mode='lines+markers',
+        marker=dict(
+            size=3,
+            color='#888',
+            symbol='triangle-right'
+        )
     )
 
     selected_circle = None
@@ -211,51 +231,84 @@ def pre_calculate_force_layouts(networks):
         force_layouts.append(pos)
     return force_layouts
 
-def create_improved_centrality_layout(G, k=0.1, iterations=50):
-    """Create an improved centrality-based layout with reduced overlap and centered mass"""
+def create_centrality_layout(G, k=0.1, iterations=50, central_force=0.2):
+    """Create a centrality-based layout for a networkx graph"""
     random.seed(42)
-    np.random.seed(42) 
-
-    ## We're doing magic math here, because this can take a while
-    ## Still overlaps a toooon, but it's betterish.
-    centrality = nx.degree_centrality(G)
+    np.random.seed(42)
+    
+    ## Eigenvector centrality with fallback to degree centrality
+    try:
+        centrality = nx.eigenvector_centrality(G)
+    except:
+        centrality = nx.degree_centrality(G)
+    
     nodes = list(G.nodes())
     n = len(nodes)
     
     ## Initial layout
     centrality_values = np.array([centrality[node] for node in nodes])
     max_centrality = np.max(centrality_values)
+    min_centrality = np.min(centrality_values)
+    
+    ## Normalization
+    if max_centrality > min_centrality:
+        normalized_centrality = (centrality_values - min_centrality) / (max_centrality - min_centrality)
+    else:
+        normalized_centrality = np.ones(n) * 0.5  ## If all centralities are equal
+    
+    ## Initial positioning
     angles = 2 * np.pi * np.random.random(n)
-    r = 1 - (centrality_values / max_centrality)
+    r = 1 - normalized_centrality
+    r = np.power(r, 0.5)
     layout = np.column_stack((r * np.cos(angles), r * np.sin(angles)))
     
     for _ in range(iterations):
-        ## Use KDTree for efficient nearest neighbor computations
         tree = cKDTree(layout)
-        distances, indices = tree.query(layout, k=n, distance_upper_bound=np.inf)
+        distances, indices = tree.query(layout, k=min(n, 10), distance_upper_bound=np.inf)
         
-        ## Compute displacements
         displacements = np.zeros_like(layout)
         for i in range(n):
             delta = layout[i] - layout[indices[i, 1:]]
             distance = np.maximum(0.01, np.linalg.norm(delta, axis=1))
-            displacements[i] = np.sum(k * delta / distance[:, np.newaxis]**2, axis=0)
+            repulsion_factor = k * (1 + 5 * normalized_centrality[i]) 
+            displacements[i] = np.sum(repulsion_factor * delta / distance[:, np.newaxis]**2, axis=0)
+        
+        central_attraction = central_force * normalized_centrality[:, np.newaxis] * -layout
+        
+        layout += displacements + central_attraction
+        
+        ## Keep nodes within the unit circle
+        distances_from_center = np.maximum(0.01, np.linalg.norm(layout, axis=1))
+        layout /= distances_from_center[:, np.newaxis]
+    
+    ## Final adjustments to prevent overlap
+    final_repulsion_iterations = 10
+    for _ in range(final_repulsion_iterations):
+        tree = cKDTree(layout)
+        distances, indices = tree.query(layout, k=2)  ## Only consider the nearest neighbor
+        
+        displacements = np.zeros_like(layout)
+        for i in range(n):
+            if distances[i, 1] < 0.05: 
+                delta = layout[i] - layout[indices[i, 1]]
+                norm = np.linalg.norm(delta)
+                if norm > 0:
+                    displacements[i] = 0.1 * delta / norm
+                else:
+                    displacements[i] = 0.1 * np.random.random(2) - 0.05
         
         layout += displacements
-        
-        center = layout.mean(axis=0)
-        layout -= center
-        
-        ## Normalize to keep nodes within a unit circle
-        max_distance = np.max(np.linalg.norm(layout, axis=1))
-        layout /= max_distance
+    
+    layout = np.nan_to_num(layout, nan=0.0, posinf=1.0, neginf=-1.0)
+    
+    layout *= 1.8
     
     return dict(zip(nodes, layout))
 
 def pre_calculate_centrality_layouts(networks):
     """Pre-calculate centrality-based layouts for all networks in parallel"""
     with multiprocessing.Pool() as pool:
-        centrality_layouts = pool.map(create_improved_centrality_layout, networks)
+        centrality_layouts = pool.map(create_centrality_layout, networks)
     return centrality_layouts
 
 def get_currency_pairs(df):
@@ -624,18 +677,6 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
 
         return fig
 
-
-    @app.callback(
-        Output('interval-component', 'disabled'),
-        [Input('play-pause-button', 'n_clicks')],
-        [State('interval-component', 'disabled')]
-    )
-    def toggle_interval(n_clicks, current_state):
-        """Toggle the interval component on and off"""
-        if n_clicks is None:
-            raise PreventUpdate
-        return not current_state
-
     @app.callback(
         Output('time-slider', 'value'),
         [Input('interval-component', 'n_intervals')],
@@ -675,6 +716,46 @@ def prepare_and_get_dash_app(is_debug=True):
 
     logging.info("Creating Dash app...") 
     app = create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, centrality_layouts)
+
+    ## This callback is used to toggle the play/pause button
+    ## It's in javascript because the python one would not work
+    app.clientside_callback(
+        """
+        function(n_intervals, n_clicks) {
+            if (n_intervals === 0 && n_clicks === 0) {
+                return true;  // Start disabled
+            }
+            if (n_clicks === null) {
+                return true;  // Keep disabled if button hasn't been clicked
+            }
+            // Toggle based on number of clicks (odd: enabled, even: disabled)
+            return n_clicks % 2 === 0;
+        }
+        """,
+        Output('interval-component', 'disabled'),
+        Input('interval-component', 'n_intervals'),
+        Input('play-pause-button', 'n_clicks')
+    )
+
+    ## This callback is used to add a spacebar listener to the play/pause button
+    app.clientside_callback(
+        """
+        function(n_clicks) {
+            if (!window.spacebarListenerAdded) {
+                document.addEventListener('keydown', function(event) {
+                    if (event.code === 'Space' || event.key === ' ') {
+                        event.preventDefault();
+                        document.getElementById('play-pause-button').click();
+                    }
+                });
+                window.spacebarListenerAdded = true;
+            }
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output('play-pause-button', 'n_clicks'),
+        Input('play-pause-button', 'n_clicks')
+    )
 
     return app    
 
