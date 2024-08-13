@@ -17,6 +17,7 @@ import pickle
 
 from itertools import chain, combinations
 import warnings
+import logging
 
 from sim.grid import (
     Agent,
@@ -48,6 +49,8 @@ def compute_pricing_assessment(
     pricing_assessments: Dict[Tuple[int, int], npt.NDArray] = {}
     grid: nx.DiGraph = state["grid"]
 
+    logging.debug(f"Starting compute_pricing_assessment for timestep {state['timestep']}")
+
     # Fill if needed (on first iteration)
     best_vendors = state["best_vendors"]
     if best_vendors == {}:
@@ -63,6 +66,7 @@ def compute_pricing_assessment(
     np.random.shuffle(nodes)
 
     for node in nodes:
+        logging.debug(f"Processing node {node}")
         customer_idx = grid[node]
         customers = [grid.nodes[idx]["agent"] for idx in customer_idx]
         customer_combos = powerset(
@@ -159,11 +163,14 @@ def compute_inherited_assessment(
     inherited_assessments: Dict[Tuple[int, int], npt.NDArray[np.float64]] = {}
     best_vendors: Dict[Tuple[int, int], List[Tuple[int, int]]] = {}
 
+    logging.debug(f"Starting compute_inherited_assessment for timestep {state['timestep']}")
+
     # Shuffle to ensure random order
     nodes = [node for node in grid.nodes()]
     np.random.shuffle(nodes)
 
     for node in nodes:
+        logging.debug(f"Processing node {node}")
         # Find best vendor among neighbors
         nodes_best_vendors = get_best_vendors(grid, node, state["pricing_assessments"])
 

@@ -89,38 +89,35 @@ def get_vendor_customer_topology() -> nx.DiGraph:
     if vendor_customer_ratio < 1:
         raise ValueError(f"vendor_customer_ratio must be at least 1, got {vendor_customer_ratio}")
 
-    # Create grid graph
-    graph = nx.grid_2d_graph(grid_size, grid_size, create_using=nx.DiGraph)
+    graph = nx.DiGraph()
     total_nodes = grid_size * grid_size
-
-    # Calculate the number of vendors and customers
+    
+    ## Calculate the number of vendors and customers
     num_vendors = max(1, total_nodes // (vendor_customer_ratio + 1))
     num_customers = total_nodes - num_vendors
-
     actual_ratio = num_customers / num_vendors
     if abs(actual_ratio - vendor_customer_ratio) > 0.1 * vendor_customer_ratio:
         logging.warning(f"Actual customer-to-vendor ratio ({actual_ratio:.2f}) differs significantly "
                        f"from requested ratio ({vendor_customer_ratio:.2f})")
-
-    # Create agents and assign to nodes
+    
+    ## Create agents and assign to nodes
     vendors = set(np.random.choice(total_nodes, num_vendors, replace=False))
     node_data = {}
-    for i, node in enumerate(graph):
+    for i in range(total_nodes):
+        node = (i // grid_size, i % grid_size)  ## 2d convert
         agent_type = "vendor" if i in vendors else "customer"
         node_data[node] = {"agent": Agent(agent_type)}
-    
-    nx.set_node_attributes(graph, node_data)
-
+        graph.add_node(node, **node_data[node])
+   
     vendor_nodes = [node for node in graph if graph.nodes[node]["agent"].type == "vendor"]
     customer_nodes = [node for node in graph if graph.nodes[node]["agent"].type == "customer"]
-    
+   
     edges = [(v, c) for v in vendor_nodes for c in customer_nodes]
     graph.add_edges_from(edges)
-    graph.add_edges_from((c, v) for (v, c) in edges) 
-
-    logging.info(f"Created graph with {num_vendors} vendors and {num_customers} customers")
-    logging.info(f"Total edges created: {graph.number_of_edges()}")
-
+    graph.add_edges_from((c, v) for (v, c) in edges)
+    
+    logging.debug("Created graph with {num_vendors} vendors and {num_customers} customers")
+    logging.debug(f"Total edges created: {graph.number_of_edges()}")
     return graph
 
 def gen_random_assessments(graph: nx.DiGraph):

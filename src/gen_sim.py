@@ -42,6 +42,15 @@ run = Executor(
 (system_events, tensor_field, sessions) = run.execute()
 df = pd.DataFrame(system_events)
 
+def add_edge_data(row):
+    """ Add edge data to the dataframe """
+    grid = row['grid']
+    edges = list(grid.edges())
+    row['edges'] = edges
+    return row
+
+df = df.apply(add_edge_data, axis=1)
+
 commit_hash = get_latest_commit_hash()
 
 save_dir: str = f"sim_results/{commit_hash}"
