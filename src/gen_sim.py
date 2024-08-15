@@ -3,20 +3,37 @@ import pandas as pd
 import pickle
 from datetime import datetime
 import os
+import logging
 
 from sim.config import exp
 from util.utils import get_latest_commit_hash
 
-# Pretty sure this just overrides value with None, gonna leave it for now
-conf_file: str | None = (
-    "sim_results/99f8fb74a11cbfcf345671cf823f6af5ef1700c9/2024-06-27 14:32:14.sim"
-)
+from sim.params import is_debug
+
+conf_file: str | None
+
+## Uncomment to load a specific configuration file
+## conf_file = ("sim_results/99f8fb74a11cbfcf345671cf823f6af5ef1700c9/2024-06-27 14:32:14.sim")
 conf_file = None
 
-# switch to single threaded mode here for debugging
-exec_context = ExecutionContext(context=ExecutionMode().single_mode)
-# os.chdir("/home/bgould/dev/index-wallets/IW-cadCAD")
-# exec_context = ExecutionContext()
+if is_debug:
+    exec_context = ExecutionContext(context=ExecutionMode().single_mode)
+
+    ## Setup logging
+    ## This doesn't seem to work at all right now but i'll leave here for now
+    logging.basicConfig(level=logging.DEBUG, 
+                        format='[%(asctime)s] [%(levelname)s] [%(filename)s] %(message)s', 
+                        datefmt='%Y-%m-%d %H:%M:%S')
+    
+    if not any(isinstance(handler, logging.StreamHandler) for handler in logging.getLogger('').handlers):
+        console = logging.StreamHandler()
+        console.setLevel(logging.DEBUG)
+        formatter = logging.Formatter('[%(asctime)s] [%(levelname)s] [%(filename)s] %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+        console.setFormatter(formatter)
+        logging.getLogger('').addHandler(console)
+
+else:
+    exec_context = ExecutionContext(context=ExecutionMode().local_mode)
 
 run = Executor(
     exec_context=exec_context,
@@ -25,6 +42,15 @@ run = Executor(
 
 (system_events, tensor_field, sessions) = run.execute()
 df = pd.DataFrame(system_events)
+
+def add_edge_data(row):
+    """ Add edge data to the dataframe """
+    grid = row['grid']
+    edges = list(grid.edges())
+    row['edges'] = edges
+    return row
+
+df = df.apply(add_edge_data, axis=1)
 
 commit_hash = get_latest_commit_hash()
 

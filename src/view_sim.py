@@ -1,17 +1,17 @@
-import sys
+## built-in
+import multiprocessing
 
-from PyQt6.QtWidgets import QApplication
+## custom
+from ui.webgui import prepare_and_get_dash_app
 
-from ui.window import MainWindow
+if __name__ == "__main__":
 
-from util.utils import get_latest_sim
+    ## Main guard is REQUIRED for multiprocessing to work in Windows
 
-latest_sim = get_latest_sim()
+    ## We use multiprocessing in the webgui to speed up the centrality layout generation
+    ## However since this 'technically' isn't the main process, we need to call freeze_support
+    multiprocessing.freeze_support()
 
-app = QApplication(sys.argv)
-window = MainWindow(
-    latest_sim
-)
-window.show()
-
-app.exec()
+    app = prepare_and_get_dash_app(is_debug=False)
+    
+    app.run_server(port=8050)
