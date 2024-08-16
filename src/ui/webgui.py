@@ -766,7 +766,8 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
         
         avg_asmt = calc_average_valuations(df.iloc[time_step], currency_1, currency_2)
         currency_valuations = [f'Currency {currency_1+1}: {avg_asmt[0]:.2e}', f'Currency {currency_2+1}: {avg_asmt[1]:.2e}']
-        title = f"Time Step: {time_step} | Average Valuations: {', '.join(currency_valuations)}"
+        num_agents = len(G.nodes())
+        title = f"Index Wallet Marketplace | Agents: {num_agents} | Time Step: {time_step}/{num_timesteps}"
         
         fig.update_layout(
             title=dict(
