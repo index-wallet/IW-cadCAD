@@ -14,4 +14,4 @@ if __name__ == "__main__":
 
     app = prepare_and_get_dash_app(is_debug=False)
     
-    app.run_server(port=8050)
+    app.run(port="8050")

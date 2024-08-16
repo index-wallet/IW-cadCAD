@@ -21,7 +21,7 @@ import networkx as nx
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import dash
-from dash import dcc, html
+from dash import dcc, html, Dash
 from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
@@ -96,7 +96,7 @@ def safe_log10(x):
     """Return the log10 of x, but return -10 if x is 0"""
     return np.log10(max(abs(x), 1e-10))
 
-def create_network_trace(G, layout='grid', pos=None, currency_1=0, currency_2=1, selected_node=None):
+def create_network_trace(G, layout='grid', pos=None, currency_1=0, currency_2=1, selected_node=None, prev_best_vendors=None, time_step=None):
     """Create plotly traces for the networkx graph"""
 
     if layout == 'grid':
@@ -234,7 +234,50 @@ def create_network_trace(G, layout='grid', pos=None, currency_1=0, currency_2=1,
             showlegend=False
         )
 
-    return edge_trace, node_trace, node_colors, selected_circle
+    shapes = []
+    annotations = []
+
+    display_transactions = time_step % 2 == 1 and prev_best_vendors is not None and any(prev_best_vendors.values())
+
+    if display_transactions:
+        for node, vendors in G.nodes(data='best_vendors'):
+            if vendors: 
+                for vendor in vendors:
+                    x0, y0 = pos[node]
+                    x1, y1 = pos[vendor]
+                    
+                    ## Calculate midpoint and control point for the curve
+                    mid_x = (x0 + x1) / 2
+                    mid_y = (y0 + y1) / 2
+                    offset = 0.2  
+                    perp_x = (y0 - y1) * offset
+                    perp_y = (x1 - x0) * offset
+                    ctrl_x = mid_x + perp_x
+                    ctrl_y = mid_y + perp_y
+                    
+                    
+                    ## Create a curved path using a quadratic Bezier curve
+                    shapes.append(dict(
+                        type="path",
+                        path=f"M {x0},{y0} Q {ctrl_x},{ctrl_y} {x1},{y1}",
+                        line=dict(width=2)
+                    ))
+                    
+                    ## Add a Unicode triangle at the end of the line
+                    annotations.append(dict(
+                        x=x1,
+                        y=y1,
+                        xref="x",
+                        yref="y",
+                        text="▶",
+                        showarrow=False,
+                        font=dict(size=10),
+                        textangle=np.degrees(np.arctan2(y1-y0, x1-x0)), 
+                        ax=5,
+                        ay=5
+                    ))
+
+    return edge_trace, node_trace, node_colors, selected_circle, shapes, annotations
 
 def calc_average_valuations(row, currency_1, currency_2):
     """Calculate the average valuation of all nodes in a row for two specified currencies"""
@@ -565,6 +608,19 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
                         'fontSize': '12px'
                     }
                 ),
+                dcc.RadioItems(
+                    id='show-transactions',
+                    options=[
+                        {'label': 'Show Transactions', 'value': 'show'},
+                        {'label': 'Hide Transactions', 'value': 'hide'}
+                    ],
+                    value='hide',
+                    inline=True,
+                    style={
+                        'marginTop': '10px',
+                        'fontSize': '12px'
+                    }
+                ),
             ], style={'width': '200px', 'position': 'absolute', 'left': '10px', 'top': '50px', 'zIndex': '1000'}),
             dcc.Graph(id='network-graph', style={'height': '80vh', 'width': 'calc(100% - 220px)', 'marginLeft': '220px'}),
         ], style={'position': 'relative', 'height': '80vh'}),
@@ -628,10 +684,12 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
         Input('currency-pair-dropdown', 'value'),
         Input('attribute-dropdown', 'value'),
         Input('wallet-lines-dropdown', 'value'),
-        Input('network-graph', 'clickData')]
+        Input('network-graph', 'clickData'),
+        Input('show-transactions', 'value')]
     )
-    def update_graph(time_step, layout, currency_pair, selected_attribute, num_wallet_lines, clickData):
+    def update_graph(time_step, layout, currency_pair, selected_attribute, num_wallet_lines, clickData, show_transactions):
         G = networks[time_step]
+        prev_G = networks[time_step - 1] if time_step > 0 else None
 
         if clickData:
             try:
@@ -644,6 +702,8 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
 
         currency_1, currency_2 = map(int, currency_pair.split(','))
             
+        prev_best_vendors = {node: prev_G.nodes[node]['best_vendors'] for node in prev_G.nodes()} if prev_G else None
+
         fig = make_subplots(rows=3, cols=2, 
                             column_widths=[0.7, 0.3],
                             row_heights=[0.33, 0.33, 0.33],
@@ -663,16 +723,28 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
         
         ## Network graph (left side, full height)
         if layout == 'force':
-            edge_trace, node_trace, node_colors, selected_circle = create_network_trace(G, layout='force', pos=force_layouts[time_step], currency_1=currency_1, currency_2=currency_2, selected_node=selected_node)
+            edge_trace, node_trace, node_colors, selected_circle, shapes, annotations = create_network_trace(
+                G, layout='force', pos=force_layouts[time_step], currency_1=currency_1, currency_2=currency_2, 
+                selected_node=selected_node, prev_best_vendors=prev_best_vendors, time_step=time_step
+            )
         elif layout == 'centrality':
-            edge_trace, node_trace, node_colors, selected_circle = create_network_trace(G, layout='force', pos=centrality_layouts[time_step], currency_1=currency_1, currency_2=currency_2, selected_node=selected_node)
+            edge_trace, node_trace, node_colors, selected_circle, shapes, annotations = create_network_trace(
+                G, layout='force', pos=centrality_layouts[time_step], currency_1=currency_1, currency_2=currency_2, 
+                selected_node=selected_node, prev_best_vendors=prev_best_vendors, time_step=time_step
+            )
         else:
-            edge_trace, node_trace, node_colors, selected_circle = create_network_trace(G, layout='grid', currency_1=currency_1, currency_2=currency_2, selected_node=selected_node)
-        
+            edge_trace, node_trace, node_colors, selected_circle, shapes, annotations = create_network_trace(
+                G, layout='grid', currency_1=currency_1, currency_2=currency_2, 
+                selected_node=selected_node, prev_best_vendors=prev_best_vendors, time_step=time_step
+            )
+            
         fig.add_trace(edge_trace, row=1, col=1)
         fig.add_trace(node_trace, row=1, col=1)
         if selected_circle:
             fig.add_trace(selected_circle, row=1, col=1)
+
+        if(show_transactions == 'show'):
+            fig.update_layout(shapes=shapes, annotations=annotations)
 
         if layout == 'grid':
             grid_size = int(np.sqrt(len(G.nodes())))
@@ -701,7 +773,7 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
         scatter_trace_dict['marker'] = dict(
             size=8,
             color=node_colors,
-            colorscale=node_trace.marker.colorscale,
+            colorscale=node_trace.marker.colorscale, 
             showscale=False
         )
         scatter_trace_dict['visible'] = True
@@ -827,7 +899,8 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
         )
         
         for i in range(len(fig.layout.annotations)):
-            fig.layout.annotations[i].text += f" (Step {time_step})"
+            if("▶" not in fig.layout.annotations[i].text): ## If it's part of the network graph arrow annotation, don't update it
+                fig.layout.annotations[i].text += f" (Step {time_step})"
 
         for row in range(1, 4):
             for col in range(1, 3):
@@ -903,7 +976,7 @@ def prepare_and_get_dash_app(is_debug=True):
     all_traces = pre_calculate_traces(networks, node_metrics, num_timesteps, currency_pairs)
 
     logging.info("Creating Dash app...") 
-    app:dash = create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, centrality_layouts, node_metrics, all_traces)
+    app:Dash = create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, centrality_layouts, node_metrics, all_traces)
 
     ## This callback is used to toggle the play/pause button
     ## It's in javascript because the python one would not work
@@ -955,4 +1028,4 @@ if __name__ == '__main__':
 
     app = prepare_and_get_dash_app()
 
-    app.run(debug=True, port=8050)
+    app.run(debug=True, port="8050")
