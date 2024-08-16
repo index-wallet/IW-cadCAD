@@ -106,10 +106,15 @@ def create_network_trace(G, layout='grid', pos=None, currency_1=0, currency_2=1,
 
     node_x, node_y = zip(*[pos[node] for node in G.nodes()])
 
-    total_wallet_values = [sum(G.nodes[node]['wallet']) for node in G.nodes()]
-    max_wallet_value, min_wallet_value = max(total_wallet_values), min(total_wallet_values)
-    node_sizes = [5 + 25 * (value - min_wallet_value) / (max_wallet_value - min_wallet_value) 
-                  if max_wallet_value != min_wallet_value else 15 for value in total_wallet_values]
+    total_wallet_values = [calculate_wallet_value(G.nodes[node]['wallet'], G.nodes[node]['inherited_assessment']) for node in G.nodes()]
+    
+    ## Use logarithmic scaling for node sizes otherwise it'll be pretty extreme
+    log_values = np.log1p(total_wallet_values) 
+    min_log_value, max_log_value = min(log_values), max(log_values)
+    
+    min_size, max_size = 10, 30 
+    node_sizes = [min_size + (max_size - min_size) * (log_value - min_log_value) / (max_log_value - min_log_value)
+                  for log_value in log_values]
 
     node_colors = [calculate_node_color(G.nodes[node]['wallet'], currency_1, currency_2) for node in G.nodes()]
 
