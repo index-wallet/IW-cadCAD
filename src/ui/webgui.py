@@ -7,6 +7,7 @@
 from itertools import combinations
 from functools import partial
 import pickle
+import re
 import multiprocessing
 import random
 import logging
@@ -116,11 +117,17 @@ def create_network_trace(G, layout='grid', pos=None, currency_1=0, currency_2=1,
         [1, 'rgb(49,54,149)']    ## Dark blue
     ]
     
+    def format_float(value):
+        """Format a float to 4 decimal places"""
+        return f"{float(value):.4f}"
+
     def format_demand(demand):
         """Format demand string with line breaks after each full node-value pair"""
         formatted = str(demand)
         result = []
         paren_count = 0
+        number_pattern = re.compile(r'\d+\.\d+')
+        
         for char in formatted:
             if char == '(':
                 paren_count += 1
@@ -132,19 +139,20 @@ def create_network_trace(G, layout='grid', pos=None, currency_1=0, currency_2=1,
             if paren_count == 0 and char == ',':
                 result.append('<br>')
         
-        return ''.join(result).rstrip(',<br>') + ')' ## So we don't end with a comma and add the final parenthesis
+        joined_result = ''.join(result).rstrip(',<br>') + ')'
+        
+        return number_pattern.sub(lambda m: format_float(float(m.group())), joined_result)
 
     hover_texts = [
         f"Agent: {node}<br>"
         f"Best Vendors: {G.nodes[node]['best_vendors']}<br>"
         f"Wallet: {G.nodes[node]['wallet']}<br>"
         f"Currency Valuation: {G.nodes[node]['inherited_assessment']}<br>"
-        f"Price: {G.nodes[node]['price']}<br>"
+        f"Price: {format_float(G.nodes[node]['price'])}<br>"
         f"Demand:<br>{format_demand(G.nodes[node]['demand'])}<br>"
-        f"Type: {G.nodes[node]['type']}"
+        f"Prosumer Group (vendor|customer|both): {G.nodes[node]['type']}"
         for node in G.nodes()
     ]
-
 
     edge_x, edge_y = [], []
 
@@ -358,7 +366,7 @@ def fast_process_time_step(time_step, networks, node_metrics, currency_pairs, nu
             line=dict(width=1),
             hoverinfo='text',
             hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black"),
-            text=[f"Agent: {node}<br>Time Step: {t}<br>Total Wallet: {v:.4f}" for t, v in enumerate(values)],
+            text=[f"Agent: {node}<br>Time Step: {t}<br>Total Wallet: {v}" for t, v in enumerate(values)],
             showlegend=False,
             visible=False
         ) for node, values in zip(nodes, wallet_sums)
@@ -375,7 +383,7 @@ def fast_process_time_step(time_step, networks, node_metrics, currency_pairs, nu
             y=scatter_y,
             mode='markers',
             marker=dict(size=8, showscale=False),
-            text=[f"Agent: {node}<br>Time Step: {time_step}<br>Currency {currency_1+1} Valuation: {x:.4f}<br>Currency {currency_2+1} Valuation: {y:.4f}" for node, x, y in zip(nodes, scatter_x, scatter_y)],
+            text=[f"Agent: {node}<br>Time Step: {time_step}<br>Currency {currency_1+1} Valuation: {x:.4e}<br>Currency {currency_2+1} Valuation: {y:.4e}" for node, x, y in zip(nodes, scatter_x, scatter_y)],
             hoverinfo='text',
             hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black"),
             name='Pricing Valuations',
@@ -399,7 +407,7 @@ def fast_process_time_step(time_step, networks, node_metrics, currency_pairs, nu
                 visible=False,
                 hoverinfo='text',
                 hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black"),
-                text=[f"Agent: {node}<br>Time Step: {t}<br>Wallet Currency {i+1}: {v:.4f}" for t, v in enumerate(wallet_data[i])]
+                text=[f"Agent: {node}<br>Time Step: {t}<br>Wallet Currency {i+1}: {v}" for t, v in enumerate(wallet_data[i])]
             )
             node_traces[f'cv_{i}'] = dict(
                 x=time_range, 
@@ -409,7 +417,7 @@ def fast_process_time_step(time_step, networks, node_metrics, currency_pairs, nu
                 visible=False,
                 hoverinfo='text',
                 hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black"),
-                text=[f"Agent: {node}<br>Time Step: {t}<br>Currency Valuation {i+1}: {v:.4f}" for t, v in enumerate(currency_valuation_data[i])]
+                text = [f"Agent: {node}<br>Time Step: {t}<br>Currency Valuation {i+1}: {v:.4e}" for t, v in enumerate(currency_valuation_data[i])]
             )
         
         price_data = np.array(node_metrics[node]['price'][:time_step+1])
@@ -764,10 +772,8 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
                             type="log", exponentformat="power", showexponent="all",
                             title_standoff=2)
         
-        avg_asmt = calc_average_valuations(df.iloc[time_step], currency_1, currency_2)
-        currency_valuations = [f'Currency {currency_1+1}: {avg_asmt[0]:.2e}', f'Currency {currency_2+1}: {avg_asmt[1]:.2e}']
         num_agents = len(G.nodes())
-        title = f"Index Wallet Marketplace | Agents: {num_agents} | Time Step: {time_step}/{num_timesteps}"
+        title = f"Simulation of an Index Wallet Marketplace with {num_agents} agents | Current Time Step: {time_step}/{num_timesteps}"
         
         fig.update_layout(
             title=dict(
