@@ -1,3 +1,8 @@
+## Some notes
+
+## Agent and Node are basically interchangeable here. Node is the internal word and Agent is what it appears in the UI.
+## The same goes for assessment and valuation. Assessment is the internal word and valuation is what it appears in the UI.
+
 ## built-in
 from itertools import combinations
 from functools import partial
@@ -130,7 +135,7 @@ def create_network_trace(G, layout='grid', pos=None, currency_1=0, currency_2=1,
         return ''.join(result).rstrip(',<br>') + ')' ## So we don't end with a comma and add the final parenthesis
 
     hover_texts = [
-        f"Node: {node}<br>"
+        f"Agent: {node}<br>"
         f"Best Vendors: {G.nodes[node]['best_vendors']}<br>"
         f"Wallet: {G.nodes[node]['wallet']}<br>"
         f"Currency Valuation: {G.nodes[node]['inherited_assessment']}<br>"
@@ -349,11 +354,11 @@ def fast_process_time_step(time_step, networks, node_metrics, currency_pairs, nu
             x=time_range,
             y=values,
             mode='lines',
-            name=f'Node {node}',
+            name=f'Agent {node}',
             line=dict(width=1),
             hoverinfo='text',
             hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black"),
-            text=[f"Node: {node}<br>Time Step: {t}<br>Total Wallet: {v:.4f}" for t, v in enumerate(values)],
+            text=[f"Agent: {node}<br>Time Step: {t}<br>Total Wallet: {v:.4f}" for t, v in enumerate(values)],
             showlegend=False,
             visible=False
         ) for node, values in zip(nodes, wallet_sums)
@@ -370,10 +375,10 @@ def fast_process_time_step(time_step, networks, node_metrics, currency_pairs, nu
             y=scatter_y,
             mode='markers',
             marker=dict(size=8, showscale=False),
-            text=[f"Node: {node}<br>Time Step: {time_step}<br>Currency {currency_1+1} Assessment: {x:.4f}<br>Currency {currency_2+1} Assessment: {y:.4f}" for node, x, y in zip(nodes, scatter_x, scatter_y)],
+            text=[f"Agent: {node}<br>Time Step: {time_step}<br>Currency {currency_1+1} Valuation: {x:.4f}<br>Currency {currency_2+1} Valuation: {y:.4f}" for node, x, y in zip(nodes, scatter_x, scatter_y)],
             hoverinfo='text',
             hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black"),
-            name='Pricing Assessments',
+            name='Pricing Valuations',
             visible=False
         )
     
@@ -394,7 +399,7 @@ def fast_process_time_step(time_step, networks, node_metrics, currency_pairs, nu
                 visible=False,
                 hoverinfo='text',
                 hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black"),
-                text=[f"Node: {node}<br>Time Step: {t}<br>Wallet Currency {i+1}: {v:.4f}" for t, v in enumerate(wallet_data[i])]
+                text=[f"Agent: {node}<br>Time Step: {t}<br>Wallet Currency {i+1}: {v:.4f}" for t, v in enumerate(wallet_data[i])]
             )
             node_traces[f'cv_{i}'] = dict(
                 x=time_range, 
@@ -404,7 +409,7 @@ def fast_process_time_step(time_step, networks, node_metrics, currency_pairs, nu
                 visible=False,
                 hoverinfo='text',
                 hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black"),
-                text=[f"Node: {node}<br>Time Step: {t}<br>Currency Valuation {i+1}: {v:.4f}" for t, v in enumerate(currency_valuation_data[i])]
+                text=[f"Agent: {node}<br>Time Step: {t}<br>Currency Valuation {i+1}: {v:.4f}" for t, v in enumerate(currency_valuation_data[i])]
             )
         
         price_data = np.array(node_metrics[node]['price'][:time_step+1])
@@ -416,7 +421,7 @@ def fast_process_time_step(time_step, networks, node_metrics, currency_pairs, nu
             visible=False,
             hoverinfo='text',
             hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black"),
-            text=[f"Node: {node}<br>Time Step: {t}<br>Price: {v:.4f}" for t, v in enumerate(price_data)]
+            text=[f"Agent: {node}<br>Time Step: {t}<br>Price: {v:.4f}" for t, v in enumerate(price_data)]
         )
         
         node_metric_traces[node] = node_traces
@@ -557,10 +562,14 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
             ),
             dcc.Dropdown(
                 id='attribute-dropdown',
-                options=[{'label': 'All', 'value': 'all'},
-                        {'label': 'Price', 'value': 'price'}] +
-                        [{'label': f'Currency Valuation {i+1}', 'value': f'currency_valuation_{i}'} for i in range(num_currencies)] +
-                        [{'label': f'Wallet Currency {i+1}', 'value': f'wallet_currency_{i}'} for i in range(num_currencies)],
+                options=[
+                    {'label': 'All', 'value': 'all'},
+                    {'label': 'Price', 'value': 'price'},
+                    {'label': 'All Currencies', 'value': 'all_currencies'},
+                    {'label': 'All Valuations', 'value': 'all_valuations'}
+                ] +
+                [{'label': f'Currency Valuation {i+1}', 'value': f'currency_valuation_{i}'} for i in range(num_currencies)] +
+                [{'label': f'Wallet Currency {i+1}', 'value': f'wallet_currency_{i}'} for i in range(num_currencies)],
                 value='all',
                 clearable=False,
                 searchable=False,
@@ -627,8 +636,8 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
                             horizontal_spacing=0.08, 
                             subplot_titles=[
                                 "", 
-                                f"Currency {currency_1+1} vs {currency_2+1} Assessments",
-                                f"Node Metrics for Node {selected_node}",
+                                f"Currency {currency_1+1} vs {currency_2+1} Valuations",
+                                f"Agent Metrics for Agent {selected_node}",
                                 "Total Wallet Amount Over Time"
                             ])
         
@@ -695,6 +704,20 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
             trace = go.Scattergl(**node_traces['price'])
             fig.add_trace(trace, row=2, col=2)
             y_axis_title = "Price"
+
+        elif selected_attribute == 'all_currencies':
+            for i in range(num_currencies):
+                node_traces[f'wallet_{i}']['visible'] = True
+                trace = go.Scattergl(**node_traces[f'wallet_{i}'])
+                fig.add_trace(trace, row=2, col=2)
+            y_axis_title = "All Currencies"
+
+        elif selected_attribute == 'all_valuations':
+            for i in range(num_currencies):
+                node_traces[f'cv_{i}']['visible'] = True
+                trace = go.Scattergl(**node_traces[f'cv_{i}'])
+                fig.add_trace(trace, row=2, col=2)
+            y_axis_title = "All Valuations"
 
         elif selected_attribute.startswith('currency_valuation_'):
             currency_index = int(selected_attribute.split('_')[-1])
@@ -763,10 +786,10 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
         fig.update_xaxes(showgrid=False, zeroline=False, showticklabels=False, row=1, col=1)
         fig.update_yaxes(showgrid=False, zeroline=False, showticklabels=False, row=1, col=1)
 
-        fig.update_xaxes(title_text=f"Currency {currency_1+1} Assessment", row=1, col=2, 
+        fig.update_xaxes(title_text=f"Currency {currency_1+1} Valuation", row=1, col=2, 
                             type="log", exponentformat="power", showexponent="all",
                             title_standoff=2)
-        fig.update_yaxes(title_text=f"Currency {currency_2+1}<br>Assessment", row=1, col=2, 
+        fig.update_yaxes(title_text=f"Currency {currency_2+1}<br>Valuation", row=1, col=2, 
                         type="log", exponentformat="power", showexponent="all",
                         title_standoff=2)
         
