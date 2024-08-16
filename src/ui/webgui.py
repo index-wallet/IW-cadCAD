@@ -60,6 +60,10 @@ def calculate_node_color(wallet, currency_1, currency_2):
 
     return ratio
 
+def calculate_wallet_value(wallet, valuation):
+    """Calculate the total value of a wallet based on the valuation of each currency"""
+    return sum(amount * value for amount, value in zip(wallet, valuation))
+
 def create_network_from_grid(row):
     """Create a networkx graph from the grid data in a row of the DataFrame"""
     G = nx.DiGraph()
@@ -147,6 +151,7 @@ def create_network_trace(G, layout='grid', pos=None, currency_1=0, currency_2=1,
         f"Agent: {node}<br>"
         f"Best Vendors: {G.nodes[node]['best_vendors']}<br>"
         f"Wallet: {G.nodes[node]['wallet']}<br>"
+        f"Wallet Value: {calculate_wallet_value(G.nodes[node]['wallet'], G.nodes[node]['inherited_assessment']):.4e}<br>"
         f"Currency Valuation: {G.nodes[node]['inherited_assessment']}<br>"
         f"Price: {format_float(G.nodes[node]['price'])}<br>"
         f"Demand:<br>{format_demand(G.nodes[node]['demand'])}<br>"
@@ -334,6 +339,7 @@ def pre_calculate_node_metrics(networks):
             if node not in node_metrics:
                 node_metrics[node] = {
                     'wallet': [],
+                    'wallet_value': [],
                     'price': [],
                     'inherited_assessment': [],
                     'pricing_assessment': [],
@@ -342,6 +348,7 @@ def pre_calculate_node_metrics(networks):
             
             node_data = G.nodes[node]
             node_metrics[node]['wallet'].append(node_data['wallet'])
+            node_metrics[node]['wallet_value'].append(calculate_wallet_value(node_data['wallet'], node_data['inherited_assessment']))
             node_metrics[node]['price'].append(node_data['price'])
             node_metrics[node]['inherited_assessment'].append(node_data['inherited_assessment'])
             node_metrics[node]['pricing_assessment'].append(node_data['pricing_assessment'])
@@ -355,8 +362,8 @@ def fast_process_time_step(time_step, networks, node_metrics, currency_pairs, nu
     nodes = list(G.nodes())
     time_range = np.arange(time_step + 1)
     
-    ## Wallet amount traces
-    wallet_sums = np.array([[sum(node_metrics[node]['wallet'][t]) for t in range(time_step + 1)] for node in nodes])
+    ## Wallet value traces
+    wallet_values = np.array([[node_metrics[node]['wallet_value'][t] for t in range(time_step + 1)] for node in nodes])
     wallet_traces = [
         dict(
             x=time_range,
@@ -366,10 +373,10 @@ def fast_process_time_step(time_step, networks, node_metrics, currency_pairs, nu
             line=dict(width=1),
             hoverinfo='text',
             hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black"),
-            text=[f"Agent: {node}<br>Time Step: {t}<br>Total Wallet: {v}" for t, v in enumerate(values)],
+            text=[f"Agent: {node}<br>Time Step: {t}<br>Total Wallet Value: {v:.4e}" for t, v in enumerate(values)],
             showlegend=False,
             visible=False
-        ) for node, values in zip(nodes, wallet_sums)
+        ) for node, values in zip(nodes, wallet_values)
     ]
     
     ## Currency scatter traces
@@ -646,7 +653,7 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
                                 "", 
                                 f"Currency {currency_1+1} vs {currency_2+1} Valuations",
                                 f"Agent Metrics for Agent {selected_node}",
-                                "Total Wallet Amount Over Time"
+                                "Total Wallet Value Over Time"
                             ])
         
         ## Network graph (left side, full height)
@@ -741,7 +748,7 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
             fig.add_trace(trace, row=2, col=2)
             y_axis_title = f"Wallet Currency {currency_index+1}"
         
-        ## Wallet amount line graph (bottom right)
+        ## Wallet value line graph (bottom right)
         sorted_traces = sorted(all_traces['wallet_traces'][time_step], 
                             key=lambda trace_dict: max(trace_dict['y'][:time_step+1]), 
                             reverse=True)
