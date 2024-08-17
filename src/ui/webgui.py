@@ -128,6 +128,19 @@ def create_network_trace(graph:nx.DiGraph, layout:str='grid', pos=None, currency
         [0.75, 'rgb(69,117,180)'],  ## Light blue
         [1, 'rgb(49,54,149)']    ## Dark blue
     ]
+
+    def interpolate_color(val):
+        """Interpolate color based on value and custom colorscale"""
+        for i in range(len(custom_colorscale) - 1):
+            if custom_colorscale[i][0] <= val <= custom_colorscale[i+1][0]:
+                t = (val - custom_colorscale[i][0]) / (custom_colorscale[i+1][0] - custom_colorscale[i][0])
+                r1, g1, b1 = map(int, custom_colorscale[i][1][4:-1].split(','))
+                r2, g2, b2 = map(int, custom_colorscale[i+1][1][4:-1].split(','))
+                r = int(r1 * (1-t) + r2 * t)
+                g = int(g1 * (1-t) + g2 * t)
+                b = int(b1 * (1-t) + b2 * t)
+                return f'rgb({r},{g},{b})'
+        return custom_colorscale[-1][1]  ## Return last color if val > 1
     
     def format_float(value):
         """Format a float to 4 decimal places"""
@@ -258,12 +271,16 @@ def create_network_trace(graph:nx.DiGraph, layout:str='grid', pos=None, currency
                     ctrl_x = mid_x + perp_x
                     ctrl_y = mid_y + perp_y
                     
+                    ## Get the color of the originating node
+                    node_index = list(graph.nodes()).index(node)
+                    node_color_value = node_colors[node_index]
+                    node_color = interpolate_color(node_color_value)
                     
                     ## Create a curved path using a quadratic Bezier curve
                     shapes.append(dict(
                         type="path",
                         path=f"M {x0},{y0} Q {ctrl_x},{ctrl_y} {x1},{y1}",
-                        line=dict(width=2)
+                        line=dict(width=2, color=node_color)
                     ))
                     
                     ## Add a Unicode triangle at the end of the line
@@ -274,7 +291,7 @@ def create_network_trace(graph:nx.DiGraph, layout:str='grid', pos=None, currency
                         yref="y",
                         text="▶",
                         showarrow=False,
-                        font=dict(size=10),
+                        font=dict(size=10, color=node_color),
                         textangle=np.degrees(np.arctan2(y1-y0, x1-x0)), 
                         ax=5,
                         ay=5
