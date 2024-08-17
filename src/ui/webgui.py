@@ -29,6 +29,9 @@ import dash_bootstrap_components as dbc
 from scipy.spatial import cKDTree
 from concurrent.futures import ProcessPoolExecutor
 
+## global
+previous_node = None
+
 ## adds the parent directory to the path so util can be imported
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -97,7 +100,7 @@ def safe_log10(x:float) -> float:
     """Return the log10 of x, but return -10 if x is 0"""
     return np.log10(max(abs(x), 1e-10))
 
-def create_network_trace(graph:nx.DiGraph, layout:str='grid', pos=None, currency_1:int=0, currency_2:int=1, selected_node=None, prev_best_vendors=None, time_step=0):
+def create_network_trace(graph:nx.DiGraph, next_graph:nx.DiGraph | None, layout:str='grid', pos=None, currency_1:int=0, currency_2:int=1, selected_node=None, prev_best_vendors=None, time_step=0):
     """Create plotly traces for the networkx graph"""
 
     if layout == 'grid':
@@ -110,7 +113,7 @@ def create_network_trace(graph:nx.DiGraph, layout:str='grid', pos=None, currency
     node_x, node_y = zip(*[pos[node] for node in graph.nodes()])
 
     total_wallet_values = [calculate_wallet_value(graph.nodes[node]['wallet'], graph.nodes[node]['inherited_assessment']) for node in graph.nodes()]
-    
+
     ## Use logarithmic scaling for node sizes otherwise it'll be pretty extreme
     log_values = np.log1p(total_wallet_values) 
     min_log_value, max_log_value = min(log_values), max(log_values)
@@ -181,7 +184,6 @@ def create_network_trace(graph:nx.DiGraph, layout:str='grid', pos=None, currency
     ]
 
     edge_x, edge_y = [], []
-
     for edge in graph.edges():
         x0, y0 = pos[edge[0]]
         x1, y1 = pos[edge[1]]
@@ -253,49 +255,93 @@ def create_network_trace(graph:nx.DiGraph, layout:str='grid', pos=None, currency
     shapes = []
     annotations = []
 
+    ## only odd time steps and last step has best vendors (so excluding the first 2 steps)
     display_transactions = time_step % 2 == 1 and prev_best_vendors is not None and any(prev_best_vendors.values())
 
-    if display_transactions:
-        for node, vendors in graph.nodes(data='best_vendors'): # type: ignore
-            if vendors: 
-                for vendor in vendors:
-                    x0, y0 = pos[node]
-                    x1, y1 = pos[vendor]
-                    
-                    ## Calculate midpoint and control point for the curve
-                    mid_x = (x0 + x1) / 2
-                    mid_y = (y0 + y1) / 2
-                    offset = 0.2  
-                    perp_x = (y0 - y1) * offset
-                    perp_y = (x1 - x0) * offset
-                    ctrl_x = mid_x + perp_x
-                    ctrl_y = mid_y + perp_y
-                    
-                    ## Get the color of the originating node
-                    node_index = list(graph.nodes()).index(node)
-                    node_color_value = node_colors[node_index]
-                    node_color = interpolate_color(node_color_value)
-                    
-                    ## Create a curved path using a quadratic Bezier curve
-                    shapes.append(dict(
-                        type="path",
-                        path=f"M {x0},{y0} Q {ctrl_x},{ctrl_y} {x1},{y1}",
-                        line=dict(width=2, color=node_color)
-                    ))
-                    
-                    ## Add a Unicode triangle at the end of the line
-                    annotations.append(dict(
-                        x=x1,
-                        y=y1,
-                        xref="x",
-                        yref="y",
-                        text="▶",
-                        showarrow=False,
-                        font=dict(size=10, color=node_color),
-                        textangle=np.degrees(np.arctan2(y1-y0, x1-x0)), 
-                        ax=5,
-                        ay=5
-                    ))
+    ## next graph will only not be a thing at the last time step which should be even so 'technically' shouldn't trigger anyways
+    if display_transactions and next_graph:
+        
+        transaction_sizes = {}
+        
+        ## using wallet valuation differences (so next time step - current time step) to calculate transaction sizes
+        for node in graph.nodes():
+            current_wallet = np.array(graph.nodes[node]['wallet'])
+            current_valuation = np.array(graph.nodes[node]['inherited_assessment'])
+            next_wallet = np.array(next_graph.nodes[node]['wallet'])
+            next_valuation = np.array(next_graph.nodes[node]['inherited_assessment'])
+            
+            current_wealth = current_wallet * current_valuation
+            next_wealth = next_wallet * next_valuation
+            
+            wealth_diff = current_wealth - next_wealth
+            
+            for vendor in prev_best_vendors.get(node, []): ## type: ignore
+                vendor_current_wallet = np.array(graph.nodes[vendor]['wallet'])
+                vendor_current_valuation = np.array(graph.nodes[vendor]['inherited_assessment'])
+                vendor_next_wallet = np.array(next_graph.nodes[vendor]['wallet'])
+                vendor_next_valuation = np.array(next_graph.nodes[vendor]['inherited_assessment'])
+                
+                vendor_current_wealth = vendor_current_wallet * vendor_current_valuation
+                vendor_next_wealth = vendor_next_wallet * vendor_next_valuation
+                
+                vendor_wealth_diff = vendor_next_wealth - vendor_current_wealth
+                
+                transaction_size = np.sum(np.minimum(wealth_diff, vendor_wealth_diff))
+                transaction_sizes[(node, vendor)] = transaction_size
+
+        max_transaction = max(abs(size) for size in transaction_sizes.values()) if transaction_sizes else 1
+        min_width, max_width = 1, 10
+
+        for (node, vendor), transaction_size in transaction_sizes.items():
+            x0, y0 = pos[node]
+            x1, y1 = pos[vendor]
+            
+            ## Calculate midpoint and control point for the curve
+            mid_x = (x0 + x1) / 2
+            mid_y = (y0 + y1) / 2
+            offset = 0.2  
+            perp_x = (y0 - y1) * offset
+            perp_y = (x1 - x0) * offset
+            ctrl_x = mid_x + perp_x
+            ctrl_y = mid_y + perp_y
+            
+            ## Get the color of the originating node
+            node_index = list(graph.nodes()).index(node)
+            node_color_value = node_colors[node_index]
+            node_color = interpolate_color(node_color_value)
+            
+            ## Calculate arrow width based on transaction size
+            normalized_size = abs(transaction_size) / max_transaction
+            arrow_width = min_width + (max_width - min_width) * normalized_size
+            
+            ## Determine arrow direction
+            if transaction_size > 0:
+                start_x, start_y = x0, y0
+                end_x, end_y = x1, y1
+            else:
+                start_x, start_y = x1, y1
+                end_x, end_y = x0, y0
+            
+            ## Create a curved path using a quadratic Bezier curve
+            shapes.append(dict(
+                type="path",
+                path=f"M {start_x},{start_y} Q {ctrl_x},{ctrl_y} {end_x},{end_y}",
+                line=dict(width=arrow_width, color=node_color)
+            ))
+            
+            ## Add a Unicode triangle at the end of the line
+            annotations.append(dict(
+                x=end_x,
+                y=end_y,
+                xref="x",
+                yref="y",
+                text="▶",
+                showarrow=False,
+                font=dict(size=10 + arrow_width, color=node_color),
+                textangle=np.degrees(np.arctan2(end_y-start_y, end_x-start_x)), 
+                ax=5,
+                ay=5
+            ))
 
     return edge_trace, node_trace, node_colors, selected_circle, shapes, annotations
 
@@ -723,21 +769,29 @@ def create_dash_app(df:pd.DataFrame,
         Input('show-transactions', 'value')]
     )
     def update_graph(time_step:int, layout:str, currency_pair:str, selected_attribute:str, num_wallet_lines:int, clickData:dict, show_transactions:str) -> go.Figure:
-        graph = networks[time_step]
-        prev_graph = networks[time_step - 1] if time_step > 0 else None
+        
+        global previous_node
 
+        graph = networks[time_step]
+        next_graph = networks[time_step - 1] if time_step > 0 else None
+        next_graph = networks[time_step + 1] if time_step < num_timesteps else None
+
+        ## Sometimes if the user clicks weirdly it'll return None which will crash the entire simulation
+        ## We can just revert to the previous node in that case
         if clickData:
             try:
                 selected_node = eval(clickData['points'][0]['text'].split('<br>')[0].split(': ')[1])
+                previous_node = selected_node
             except:
-                selected_node = None
+                selected_node = previous_node
         else:
             random.seed(42)
             selected_node = random.choice(list(graph.nodes()))
+            previous_node = selected_node
 
         currency_1, currency_2 = map(int, currency_pair.split(','))
             
-        prev_best_vendors = {node: prev_graph.nodes[node]['best_vendors'] for node in prev_graph.nodes()} if prev_graph else None
+        prev_best_vendors = {node: next_graph.nodes[node]['best_vendors'] for node in next_graph.nodes()} if next_graph else None
 
         fig = make_subplots(rows=3, cols=2, 
                             column_widths=[0.7, 0.3],
@@ -760,17 +814,17 @@ def create_dash_app(df:pd.DataFrame,
         if layout == 'force':
             edge_trace, node_trace, node_colors, selected_circle, shapes, annotations = create_network_trace(
                 graph, layout='force', pos=force_layouts[time_step], currency_1=currency_1, currency_2=currency_2, 
-                selected_node=selected_node, prev_best_vendors=prev_best_vendors, time_step=time_step
+                selected_node=selected_node, prev_best_vendors=prev_best_vendors, time_step=time_step, next_graph=next_graph
             )
         elif layout == 'centrality':
             edge_trace, node_trace, node_colors, selected_circle, shapes, annotations = create_network_trace(
                 graph, layout='force', pos=centrality_layouts[time_step], currency_1=currency_1, currency_2=currency_2, 
-                selected_node=selected_node, prev_best_vendors=prev_best_vendors, time_step=time_step
+                selected_node=selected_node, prev_best_vendors=prev_best_vendors, time_step=time_step, next_graph=next_graph
             )
         else:
             edge_trace, node_trace, node_colors, selected_circle, shapes, annotations = create_network_trace(
                 graph, layout='grid', currency_1=currency_1, currency_2=currency_2, 
-                selected_node=selected_node, prev_best_vendors=prev_best_vendors, time_step=time_step
+                selected_node=selected_node, prev_best_vendors=prev_best_vendors, time_step=time_step, next_graph=next_graph
             )
             
         fig.add_trace(edge_trace, row=1, col=1)
@@ -934,6 +988,7 @@ def create_dash_app(df:pd.DataFrame,
         )
         
         ## If it's part of the network graph arrow annotation, don't update it
+        ## Also it does have the annotations attribute but plotly has jack for type hints so it's a bit annoying
         for i in range(len(fig.layout.annotations)): # type: ignore
             if("▶" not in fig.layout.annotations[i].text): # type: ignore
                 fig.layout.annotations[i].text += f" (Step {time_step})"  # type: ignore
