@@ -132,18 +132,31 @@ def create_network_trace(graph:nx.DiGraph, next_graph:nx.DiGraph | None, layout:
         [1, 'rgb(49,54,149)']    ## Dark blue
     ]
 
+    colorscale_values = np.array([x[0] for x in custom_colorscale])
+    colorscale_colors = np.array([list(map(int, x[1][4:-1].split(','))) for x in custom_colorscale])
+
     def interpolate_color(val):
-        """Interpolate color based on value and custom colorscale"""
-        for i in range(len(custom_colorscale) - 1):
-            if custom_colorscale[i][0] <= val <= custom_colorscale[i+1][0]:
-                t = (val - custom_colorscale[i][0]) / (custom_colorscale[i+1][0] - custom_colorscale[i][0])
-                r1, g1, b1 = map(int, custom_colorscale[i][1][4:-1].split(','))
-                r2, g2, b2 = map(int, custom_colorscale[i+1][1][4:-1].split(','))
-                r = int(r1 * (1-t) + r2 * t)
-                g = int(g1 * (1-t) + g2 * t)
-                b = int(b1 * (1-t) + b2 * t)
-                return f'rgb({r},{g},{b})'
-        return custom_colorscale[-1][1]  ## Return last color if val > 1
+        """Vectorized color interpolation based on value and custom colorscale"""
+        if np.isscalar(val):
+            val = np.array([val])
+        else:
+            val = np.array(val)
+        
+        index = np.searchsorted(colorscale_values, val, side='right') - 1
+        index = np.clip(index, 0, len(colorscale_values) - 2)
+        
+        ## Calculate the fractional distance between the two nearest color points
+        t = (val - colorscale_values[index]) / (colorscale_values[index+1] - colorscale_values[index])
+        t = t[:, np.newaxis]  ## Add dimension for broadcasting
+        
+        color = (1-t) * colorscale_colors[index] + t * colorscale_colors[index+1]
+        color = color.astype(int)
+        
+        ## Format as RGB strings
+        if len(color) == 1:
+            return f'rgb({color[0,0]},{color[0,1]},{color[0,2]})'
+        else:
+            return [f'rgb({r},{g},{b})' for r, g, b in color]
     
     def format_float(value):
         """Format a float to 4 decimal places"""
@@ -265,24 +278,14 @@ def create_network_trace(graph:nx.DiGraph, next_graph:nx.DiGraph | None, layout:
         
         ## using wallet valuation differences (so next time step - current time step) to calculate transaction sizes
         for node in graph.nodes():
-            current_wallet = np.array(graph.nodes[node]['wallet'])
-            current_valuation = np.array(graph.nodes[node]['inherited_assessment'])
-            next_wallet = np.array(next_graph.nodes[node]['wallet'])
-            next_valuation = np.array(next_graph.nodes[node]['inherited_assessment'])
-            
-            current_wealth = current_wallet * current_valuation
-            next_wealth = next_wallet * next_valuation
+            current_wealth = np.array(graph.nodes[node]['wallet']) * np.array(graph.nodes[node]['inherited_assessment'])
+            next_wealth = np.array(next_graph.nodes[node]['wallet']) * np.array(next_graph.nodes[node]['inherited_assessment'])
             
             wealth_diff = current_wealth - next_wealth
             
             for vendor in prev_best_vendors.get(node, []): ## type: ignore
-                vendor_current_wallet = np.array(graph.nodes[vendor]['wallet'])
-                vendor_current_valuation = np.array(graph.nodes[vendor]['inherited_assessment'])
-                vendor_next_wallet = np.array(next_graph.nodes[vendor]['wallet'])
-                vendor_next_valuation = np.array(next_graph.nodes[vendor]['inherited_assessment'])
-                
-                vendor_current_wealth = vendor_current_wallet * vendor_current_valuation
-                vendor_next_wealth = vendor_next_wallet * vendor_next_valuation
+                vendor_current_wealth = np.array(graph.nodes[vendor]['wallet']) * np.array(graph.nodes[vendor]['inherited_assessment'])
+                vendor_next_wealth = np.array(next_graph.nodes[vendor]['wallet']) * np.array(next_graph.nodes[vendor]['inherited_assessment'])
                 
                 vendor_wealth_diff = vendor_next_wealth - vendor_current_wealth
                 
@@ -297,30 +300,19 @@ def create_network_trace(graph:nx.DiGraph, next_graph:nx.DiGraph | None, layout:
             x1, y1 = pos[vendor]
             
             ## Calculate midpoint and control point for the curve
-            mid_x = (x0 + x1) / 2
-            mid_y = (y0 + y1) / 2
+            mid_x, mid_y = (x0 + x1) / 2, (y0 + y1) / 2
             offset = 0.2  
-            perp_x = (y0 - y1) * offset
-            perp_y = (x1 - x0) * offset
-            ctrl_x = mid_x + perp_x
-            ctrl_y = mid_y + perp_y
+            perp_x, perp_y = (y0 - y1) * offset, (x1 - x0) * offset
+            ctrl_x, ctrl_y = mid_x + perp_x, mid_y + perp_y
             
             ## Get the color of the originating node
-            node_index = list(graph.nodes()).index(node)
-            node_color_value = node_colors[node_index]
-            node_color = interpolate_color(node_color_value)
+            node_color = interpolate_color(node_colors[list(graph.nodes()).index(node)])
             
             ## Calculate arrow width based on transaction size
-            normalized_size = abs(transaction_size) / max_transaction
-            arrow_width = min_width + (max_width - min_width) * normalized_size
+            arrow_width = min_width + (max_width - min_width) * (abs(transaction_size) / max_transaction)
             
             ## Determine arrow direction
-            if transaction_size > 0:
-                start_x, start_y = x0, y0
-                end_x, end_y = x1, y1
-            else:
-                start_x, start_y = x1, y1
-                end_x, end_y = x0, y0
+            start_x, start_y, end_x, end_y = (x0, y0, x1, y1) if transaction_size > 0 else (x1, y1, x0, y0)
             
             ## Create a curved path using a quadratic Bezier curve
             shapes.append(dict(
@@ -331,28 +323,21 @@ def create_network_trace(graph:nx.DiGraph, next_graph:nx.DiGraph | None, layout:
             
             ## Add a Unicode triangle at the end of the line
             annotations.append(dict(
-                x=end_x,
-                y=end_y,
-                xref="x",
-                yref="y",
-                text="▶",
-                showarrow=False,
+                x=end_x, y=end_y,
+                xref="x", yref="y",
+                text="▶", showarrow=False,
                 font=dict(size=10 + arrow_width, color=node_color),
                 textangle=np.degrees(np.arctan2(end_y-start_y, end_x-start_x)), 
-                ax=5,
-                ay=5
+                ax=5, ay=5
             ))
 
     return edge_trace, node_trace, node_colors, selected_circle, shapes, annotations
 
-def calc_average_valuations(row:pd.Series, currency_1:int, currency_2:int) -> np.ndarray:
+def calc_average_valuations(row: pd.Series, currency_1: int, currency_2: int) -> np.ndarray:
     """Calculate the average valuation of all nodes in a row for two specified currencies"""
-    asmts = row['pricing_assessments']
-    valuation = np.array([0.0, 0.0])
-    for _, asmt in asmts.items():
-        valuation += np.array([asmt[currency_1], asmt[currency_2]])
-    valuation /= len(asmts)
-    return valuation
+    assessments = row['pricing_assessments']
+    valuations = np.array([asmt[currency_1:currency_2+1] for asmt in assessments.values()])
+    return np.mean(valuations, axis=0)
 
 def pre_calculate_force_layouts(networks:List[nx.DiGraph]):
     """Pre-calculate force-directed layouts for all networks using a fixed seed"""
@@ -367,6 +352,11 @@ def pre_calculate_force_layouts(networks:List[nx.DiGraph]):
 
 def create_centrality_layout(graph:nx.DiGraph, k:float=0.1, iterations:int=50, central_force:float=0.2):
     """Create a centrality-based layout for a networkx graph"""
+
+    ## This one is tricky, as I mentioned to barely avoid overlap while still not allowing division by zero
+    ## I'm not sure if this is the best way to do it, speed is pretty acceptable, and every time I try to optimize it
+    ## I end up with a worse layout
+
     random.seed(42)
     np.random.seed(42)
     
@@ -451,22 +441,14 @@ def pre_calculate_node_metrics(networks:List[nx.DiGraph]):
     for t, graph in enumerate(networks):
         for node in graph.nodes():
             if node not in node_metrics:
-                node_metrics[node] = {
-                    'wallet': [],
-                    'wallet_value': [],
-                    'price': [],
-                    'inherited_assessment': [],
-                    'pricing_assessment': [],
-                    'demand': []
-                }
+                node_metrics[node] = {metric: [] for metric in ['wallet', 'wallet_value', 'price', 'inherited_assessment', 'pricing_assessment', 'demand']}
             
             node_data = graph.nodes[node]
-            node_metrics[node]['wallet'].append(node_data['wallet'])
-            node_metrics[node]['wallet_value'].append(calculate_wallet_value(node_data['wallet'], node_data['inherited_assessment']))
-            node_metrics[node]['price'].append(node_data['price'])
-            node_metrics[node]['inherited_assessment'].append(node_data['inherited_assessment'])
-            node_metrics[node]['pricing_assessment'].append(node_data['pricing_assessment'])
-            node_metrics[node]['demand'].append(node_data['demand'])
+            for metric in node_metrics[node]:
+                if metric == 'wallet_value':
+                    node_metrics[node][metric].append(calculate_wallet_value(node_data['wallet'], node_data['inherited_assessment']))
+                else:
+                    node_metrics[node][metric].append(node_data[metric])
     
     return node_metrics
 
@@ -773,7 +755,6 @@ def create_dash_app(df:pd.DataFrame,
         global previous_node
 
         graph = networks[time_step]
-        next_graph = networks[time_step - 1] if time_step > 0 else None
         next_graph = networks[time_step + 1] if time_step < num_timesteps else None
 
         ## Sometimes if the user clicks weirdly it'll return None which will crash the entire simulation
@@ -837,15 +818,14 @@ def create_dash_app(df:pd.DataFrame,
 
         if layout == 'grid':
             grid_size = int(np.sqrt(len(graph.nodes())))
-            x_range = [-0.5, grid_size - 0.5]
-            y_range = [-0.5, grid_size - 0.5]
+            x_range = y_range = [-0.5, grid_size - 0.5]
         else:  ## For force-directed and centrality-based layouts
-            x_coords = node_trace.x
-            y_coords = node_trace.y
-            x_min, x_max = min(x_coords), max(x_coords) # type: ignore (Tricky cause Plotly is a bit weird with types)
-            y_min, y_max = min(y_coords), max(y_coords) # type: ignore (Tricky cause Plotly is a bit weird with types)
-            x_range = [x_min - 0.1 * (x_max - x_min), x_max + 0.1 * (x_max - x_min)]
-            y_range = [y_min - 0.1 * (y_max - y_min), y_max + 0.1 * (y_max - y_min)]
+            x_coords, y_coords = node_trace.x, node_trace.y
+            x_min, x_max = min(x_coords), max(x_coords)  ## type: ignore (Tricky cause Plotly is a bit weird with types)
+            y_min, y_max = min(y_coords), max(y_coords)  ## type: ignore (Tricky cause Plotly is a bit weird with types)
+            padding = 0.1
+            x_range = [x_min - padding * (x_max - x_min), x_max + padding * (x_max - x_min)]
+            y_range = [y_min - padding * (y_max - y_min), y_max + padding * (y_max - y_min)]
 
         fig.update_xaxes(range=x_range, row=1, col=1)
         fig.update_yaxes(range=y_range, row=1, col=1)
@@ -873,46 +853,34 @@ def create_dash_app(df:pd.DataFrame,
         node_traces = all_traces['node_metric_traces'][(time_step, selected_node)]
         
         ## Attribute selection
-        if selected_attribute == 'all':
-            for trace_key, trace_dict in node_traces.items():
-                trace_dict['visible'] = True
-                trace = go.Scattergl(**trace_dict)
-                fig.add_trace(trace, row=2, col=2)
-            y_axis_title = "All Values"
+        trace_configs = {
+            'all': list(node_traces.items()),
+            'price': [('price', node_traces['price'])],
+            'all_currencies': [(f'wallet_{i}', node_traces[f'wallet_{i}']) for i in range(num_currencies)],
+            'all_valuations': [(f'cv_{i}', node_traces[f'cv_{i}']) for i in range(num_currencies)],
+        }
 
-        elif selected_attribute == 'price':
-            node_traces['price']['visible'] = True
-            trace = go.Scattergl(**node_traces['price'])
-            fig.add_trace(trace, row=2, col=2)
-            y_axis_title = "Price"
-
-        elif selected_attribute == 'all_currencies':
-            for i in range(num_currencies):
-                node_traces[f'wallet_{i}']['visible'] = True
-                trace = go.Scattergl(**node_traces[f'wallet_{i}'])
-                fig.add_trace(trace, row=2, col=2)
-            y_axis_title = "All Currencies"
-
-        elif selected_attribute == 'all_valuations':
-            for i in range(num_currencies):
-                node_traces[f'cv_{i}']['visible'] = True
-                trace = go.Scattergl(**node_traces[f'cv_{i}'])
-                fig.add_trace(trace, row=2, col=2)
-            y_axis_title = "All Valuations"
-
-        elif selected_attribute.startswith('currency_valuation_'):
+        if selected_attribute.startswith('currency_valuation_'):
             currency_index = int(selected_attribute.split('_')[-1])
-            node_traces[f'cv_{currency_index}']['visible'] = True
-            trace = go.Scattergl(**node_traces[f'cv_{currency_index}'])
-            fig.add_trace(trace, row=2, col=2)
-            y_axis_title = f"Currency Valuation {currency_index+1}"
-
+            trace_configs[selected_attribute] = [(f'cv_{currency_index}', node_traces[f'cv_{currency_index}'])]
         elif selected_attribute.startswith('wallet_currency_'):
             currency_index = int(selected_attribute.split('_')[-1])
-            node_traces[f'wallet_{currency_index}']['visible'] = True
-            trace = go.Scattergl(**node_traces[f'wallet_{currency_index}'])
-            fig.add_trace(trace, row=2, col=2)
-            y_axis_title = f"Wallet Currency {currency_index+1}"
+            trace_configs[selected_attribute] = [(f'wallet_{currency_index}', node_traces[f'wallet_{currency_index}'])]
+
+        if selected_attribute not in trace_configs:
+            raise ValueError(f"Invalid attribute: {selected_attribute}")
+
+        for _, trace_dict in trace_configs.get(selected_attribute, []):
+            trace_dict['visible'] = True
+            fig.add_trace(go.Scattergl(**trace_dict), row=2, col=2)
+
+        y_axis_titles = {
+            'all': "All Values",
+            'price': "Price",
+            'all_currencies': "All Currencies",
+            'all_valuations': "All Valuations",
+        }
+        y_axis_title = y_axis_titles.get(selected_attribute, selected_attribute.replace('_', ' ').title())
         
         ## Wallet value line graph (bottom right)
         sorted_traces = sorted(all_traces['wallet_traces'][time_step], 
