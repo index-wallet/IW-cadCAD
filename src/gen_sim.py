@@ -41,7 +41,7 @@ run = Executor(
 )
 
 (system_events, tensor_field, sessions) = run.execute()
-df = pd.DataFrame(system_events)
+df = pd.DataFrame(system_events) # type: ignore
 
 def add_edge_data(row):
     """ Add edge data to the dataframe """
