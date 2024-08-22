@@ -43,6 +43,7 @@ run = Executor(
 (system_events, tensor_field, sessions) = run.execute()
 df = pd.DataFrame(system_events) # type: ignore
 
+## HACK: This is done outside of the simulation to avoid issues that occurred when I tried to do it inside
 def add_edge_data(row):
     """ Add edge data to the dataframe """
     grid = row['grid']
