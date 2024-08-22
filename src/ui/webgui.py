@@ -48,6 +48,9 @@ def load_simulation_data(filepath:str) -> pd.DataFrame:
     
     if isinstance(df, pd.Series):
         df = df.to_frame().T
+
+    ## delete all rows that contain 'substep":2'
+    df = df[~df['substep'].astype(str).str.contains('2')]
     
     logging.info(f"Loaded DataFrame with shape: {df.shape}")
 
@@ -100,7 +103,7 @@ def safe_log10(x:float) -> float:
     """Return the log10 of x, but return -10 if x is 0"""
     return np.log10(max(abs(x), 1e-10))
 
-def create_network_trace(graph:nx.DiGraph, next_graph:nx.DiGraph | None, layout:str='grid', pos=None, currency_1:int=0, currency_2:int=1, selected_node=None, prev_best_vendors=None, time_step=0):
+def create_network_trace(graph:nx.DiGraph, next_graph:nx.DiGraph | None, layout:str='grid', pos=None, currency_1:int=0, currency_2:int=1, selected_node=None, prev_best_vendors=None):
     """Create plotly traces for the networkx graph"""
 
     if layout == 'grid':
@@ -269,7 +272,7 @@ def create_network_trace(graph:nx.DiGraph, next_graph:nx.DiGraph | None, layout:
     annotations = []
 
     ## only odd time steps and last step has best vendors (so excluding the first 2 steps)
-    display_transactions = time_step % 2 == 1 and prev_best_vendors is not None and any(prev_best_vendors.values())
+    display_transactions = prev_best_vendors is not None and any(prev_best_vendors.values())
 
     ## next graph will only not be a thing at the last time step which should be even so 'technically' shouldn't trigger anyways
     if display_transactions and next_graph:
@@ -300,20 +303,27 @@ def create_network_trace(graph:nx.DiGraph, next_graph:nx.DiGraph | None, layout:
             x1, y1 = pos[vendor]
             
             ## Calculate midpoint and control point for the curve
-            mid_x, mid_y = (x0 + x1) / 2, (y0 + y1) / 2
+            mid_x = (x0 + x1) / 2
+            mid_y = (y0 + y1) / 2
             offset = 0.2  
-            perp_x, perp_y = (y0 - y1) * offset, (x1 - x0) * offset
-            ctrl_x, ctrl_y = mid_x + perp_x, mid_y + perp_y
+            perp_x = (y0 - y1) * offset
+            perp_y = (x1 - x0) * offset
+            ctrl_x = mid_x + perp_x
+            ctrl_y = mid_y + perp_y
             
             ## Get the color of the originating node
-            node_color = interpolate_color(node_colors[list(graph.nodes()).index(node)])
+            node_index = list(graph.nodes()).index(node)
+            node_color_value = node_colors[node_index]
+            node_color = interpolate_color(node_color_value)
             
             ## Calculate arrow width based on transaction size
-            arrow_width = min_width + (max_width - min_width) * (abs(transaction_size) / max_transaction)
+            normalized_size = abs(transaction_size) / max_transaction
+            arrow_width = min_width + (max_width - min_width) * normalized_size
             
-            ## Determine arrow direction
-            start_x, start_y, end_x, end_y = (x0, y0, x1, y1) if transaction_size > 0 else (x1, y1, x0, y0)
-            
+
+            start_x, start_y = x0, y0
+            end_x, end_y = x1, y1
+
             ## Create a curved path using a quadratic Bezier curve
             shapes.append(dict(
                 type="path",
@@ -323,12 +333,16 @@ def create_network_trace(graph:nx.DiGraph, next_graph:nx.DiGraph | None, layout:
             
             ## Add a Unicode triangle at the end of the line
             annotations.append(dict(
-                x=end_x, y=end_y,
-                xref="x", yref="y",
-                text="▶", showarrow=False,
+                x=end_x,
+                y=end_y,
+                xref="x",
+                yref="y",
+                text="▶",
+                showarrow=False,
                 font=dict(size=10 + arrow_width, color=node_color),
                 textangle=np.degrees(np.arctan2(end_y-start_y, end_x-start_x)), 
-                ax=5, ay=5
+                ax=5,
+                ay=5
             ))
 
     return edge_trace, node_trace, node_colors, selected_circle, shapes, annotations
@@ -685,13 +699,13 @@ def create_dash_app(df:pd.DataFrame,
                     }
                 ),
                 html.Div(
-                    "\u2139 (Transaction connections are rendered in a clockwise manner.)",
+                    "\u2139 Transaction connections are rendered as curved arrows. The arrow direction indicates which node had the other as its best vendor. The arrow color matches the originating node's color, and its width represents the transaction size.",
                     style={
                         'marginTop': '5px',
                         'fontSize': '10px',
                         'color': '#666'
-                }
-            ),
+                    }
+                )
             ], style={'width': '200px', 'position': 'absolute', 'left': '10px', 'top': '50px', 'zIndex': '1000'}),
             dcc.Graph(id='network-graph', style={'height': '80vh', 'width': 'calc(100% - 220px)', 'marginLeft': '220px'}),
         ], style={'position': 'relative', 'height': '80vh'}),
@@ -803,17 +817,17 @@ def create_dash_app(df:pd.DataFrame,
         if layout == 'force':
             edge_trace, node_trace, node_colors, selected_circle, shapes, annotations = create_network_trace(
                 graph, layout='force', pos=force_layouts[time_step], currency_1=currency_1, currency_2=currency_2, 
-                selected_node=selected_node, prev_best_vendors=prev_best_vendors, time_step=time_step, next_graph=next_graph
+                selected_node=selected_node, prev_best_vendors=prev_best_vendors, next_graph=next_graph
             )
         elif layout == 'centrality':
             edge_trace, node_trace, node_colors, selected_circle, shapes, annotations = create_network_trace(
                 graph, layout='force', pos=centrality_layouts[time_step], currency_1=currency_1, currency_2=currency_2, 
-                selected_node=selected_node, prev_best_vendors=prev_best_vendors, time_step=time_step, next_graph=next_graph
+                selected_node=selected_node, prev_best_vendors=prev_best_vendors, next_graph=next_graph
             )
         else:
             edge_trace, node_trace, node_colors, selected_circle, shapes, annotations = create_network_trace(
                 graph, layout='grid', currency_1=currency_1, currency_2=currency_2, 
-                selected_node=selected_node, prev_best_vendors=prev_best_vendors, time_step=time_step, next_graph=next_graph
+                selected_node=selected_node, prev_best_vendors=prev_best_vendors, next_graph=next_graph
             )
             
         fig.add_trace(edge_trace, row=1, col=1)

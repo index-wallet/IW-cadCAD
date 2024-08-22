@@ -113,6 +113,7 @@ def compute_pricing_assessment(
         for combo in customer_combos:
             objective = get_profit_func(list(combo))
 
+            ## I haven't touched this part of the code at all, but it appears to sometimes fail, I'm not sure why. Just rerun, seems to be rare. - Kaden
             # Ensure prices are low enough to keep every agent in combo as buyer
             constraint = scipy.optimize.LinearConstraint(
                 np.array([customer.wallet for _, customer in combo]),
