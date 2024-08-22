@@ -684,6 +684,14 @@ def create_dash_app(df:pd.DataFrame,
                         'fontSize': '12px'
                     }
                 ),
+                html.Div(
+                    "\u2139 (Transaction connections are rendered in a clockwise manner.)",
+                    style={
+                        'marginTop': '5px',
+                        'fontSize': '10px',
+                        'color': '#666'
+                }
+            ),
             ], style={'width': '200px', 'position': 'absolute', 'left': '10px', 'top': '50px', 'zIndex': '1000'}),
             dcc.Graph(id='network-graph', style={'height': '80vh', 'width': 'calc(100% - 220px)', 'marginLeft': '220px'}),
         ], style={'position': 'relative', 'height': '80vh'}),
