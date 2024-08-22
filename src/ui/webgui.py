@@ -1,7 +1,14 @@
+## Some notes
+
+## Agent and Node are basically interchangeable here. Node is the internal word and Agent is what it appears in the UI.
+## The same goes for assessment and valuation. Assessment is the internal word and valuation is what it appears in the UI.
+
 ## built-in
 from itertools import combinations
 from functools import partial
+from typing import List, Tuple, Dict, Any
 import pickle
+import re
 import multiprocessing
 import random
 import logging
@@ -15,12 +22,15 @@ import networkx as nx
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import dash
-from dash import dcc, html
+from dash import dcc, html, Dash
 from dash.dependencies import Input, Output, State
 from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 from scipy.spatial import cKDTree
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor
+
+## global
+previous_node = None
 
 ## adds the parent directory to the path so util can be imported
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -28,7 +38,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 ## custom
 from util.utils import get_latest_sim
 
-def load_simulation_data(filepath):
+def load_simulation_data(filepath:str) -> pd.DataFrame:
     """Load the sim data from a pickle file"""
 
     logging.info(f"Loading simulation data from: {filepath}")
@@ -43,7 +53,7 @@ def load_simulation_data(filepath):
 
     return df
 
-def calculate_node_color(wallet, currency_1, currency_2):
+def calculate_node_color(wallet:list, currency_1:int, currency_2:int) -> float:
     """Calculate the color of a node based on the ratio of two selected currencies"""
     sum_selected = wallet[currency_1] + wallet[currency_2]
 
@@ -54,9 +64,13 @@ def calculate_node_color(wallet, currency_1, currency_2):
 
     return ratio
 
-def create_network_from_grid(row):
+def calculate_wallet_value(wallet:list, valuation:list) -> float:
+    """Calculate the total value of a wallet based on the valuation of each currency"""
+    return sum(amount * value for amount, value in zip(wallet, valuation))
+
+def create_network_from_grid(row:pd.Series) -> nx.DiGraph:
     """Create a networkx graph from the grid data in a row of the DataFrame"""
-    G = nx.DiGraph()
+    graph = nx.DiGraph()
     grid = row['grid']
     best_vendors = row['best_vendors']
     inherited_assessments = row['inherited_assessments']
@@ -64,7 +78,7 @@ def create_network_from_grid(row):
     edges = row['edges']
     
     for node, agent in grid.nodes.data("agent"):
-        G.add_node(node, 
+        graph.add_node(node, 
                    best_vendors=best_vendors.get(node, []),
                    inherited_assessment=inherited_assessments.get(node, []),
                    pricing_assessment=pricing_assessments.get(node, []),
@@ -73,35 +87,42 @@ def create_network_from_grid(row):
                    demand=agent.demand,
                    type=agent.type)
     
-    G.add_edges_from(edges)
+    graph.add_edges_from(edges)
     
-    return G
+    return graph
 
 
-def create_time_evolving_network(df):
+def create_time_evolving_network(df:pd.DataFrame) -> list:
     """Create a list of networkx graphs from the DataFrame"""
     return [create_network_from_grid(row) for _, row in df.iterrows()]
 
-def safe_log10(x):
+def safe_log10(x:float) -> float:
     """Return the log10 of x, but return -10 if x is 0"""
     return np.log10(max(abs(x), 1e-10))
 
-def create_network_trace(G, layout='grid', pos=None, currency_1=0, currency_2=1, selected_node=None):
+def create_network_trace(graph:nx.DiGraph, next_graph:nx.DiGraph | None, layout:str='grid', pos=None, currency_1:int=0, currency_2:int=1, selected_node=None, prev_best_vendors=None, time_step=0):
     """Create plotly traces for the networkx graph"""
 
     if layout == 'grid':
-        pos = {node: node for node in G.nodes()}
+        pos = {node: node for node in graph.nodes()}
     elif layout == 'force' and pos is None:
-        pos = nx.spring_layout(G, k=1/np.sqrt(len(G.nodes())), iterations=50)
+        pos = nx.spring_layout(graph, k=1/np.sqrt(len(graph.nodes())), iterations=50)
 
-    node_x, node_y = zip(*[pos[node] for node in G.nodes()])
+    assert pos is not None, "Positional layout is required for force-directed and centrality-based layouts"
 
-    total_wallet_values = [sum(G.nodes[node]['wallet']) for node in G.nodes()]
-    max_wallet_value, min_wallet_value = max(total_wallet_values), min(total_wallet_values)
-    node_sizes = [5 + 25 * (value - min_wallet_value) / (max_wallet_value - min_wallet_value) 
-                  if max_wallet_value != min_wallet_value else 15 for value in total_wallet_values]
+    node_x, node_y = zip(*[pos[node] for node in graph.nodes()])
 
-    node_colors = [calculate_node_color(G.nodes[node]['wallet'], currency_1, currency_2) for node in G.nodes()]
+    total_wallet_values = [calculate_wallet_value(graph.nodes[node]['wallet'], graph.nodes[node]['inherited_assessment']) for node in graph.nodes()]
+
+    ## Use logarithmic scaling for node sizes otherwise it'll be pretty extreme
+    log_values = np.log1p(total_wallet_values) 
+    min_log_value, max_log_value = min(log_values), max(log_values)
+    
+    min_size, max_size = 10, 30 
+    node_sizes = [min_size + (max_size - min_size) * (log_value - min_log_value) / (max_log_value - min_log_value)
+                  for log_value in log_values]
+
+    node_colors = [calculate_node_color(graph.nodes[node]['wallet'], currency_1, currency_2) for node in graph.nodes()]
 
     custom_colorscale = [
         [0, 'rgb(165,0,38)'],    ## Dark red
@@ -110,12 +131,44 @@ def create_network_trace(G, layout='grid', pos=None, currency_1=0, currency_2=1,
         [0.75, 'rgb(69,117,180)'],  ## Light blue
         [1, 'rgb(49,54,149)']    ## Dark blue
     ]
+
+    colorscale_values = np.array([x[0] for x in custom_colorscale])
+    colorscale_colors = np.array([list(map(int, x[1][4:-1].split(','))) for x in custom_colorscale])
+
+    def interpolate_color(val):
+        """Vectorized color interpolation based on value and custom colorscale"""
+        if np.isscalar(val):
+            val = np.array([val])
+        else:
+            val = np.array(val)
+        
+        index = np.searchsorted(colorscale_values, val, side='right') - 1
+        index = np.clip(index, 0, len(colorscale_values) - 2)
+        
+        ## Calculate the fractional distance between the two nearest color points
+        t = (val - colorscale_values[index]) / (colorscale_values[index+1] - colorscale_values[index])
+        t = t[:, np.newaxis]  ## Add dimension for broadcasting
+        
+        color = (1-t) * colorscale_colors[index] + t * colorscale_colors[index+1]
+        color = color.astype(int)
+        
+        ## Format as RGB strings
+        if len(color) == 1:
+            return f'rgb({color[0,0]},{color[0,1]},{color[0,2]})'
+        else:
+            return [f'rgb({r},{g},{b})' for r, g, b in color]
     
+    def format_float(value):
+        """Format a float to 4 decimal places"""
+        return f"{float(value):.4f}"
+
     def format_demand(demand):
         """Format demand string with line breaks after each full node-value pair"""
         formatted = str(demand)
         result = []
         paren_count = 0
+        number_pattern = re.compile(r'\d+\.\d+')
+        
         for char in formatted:
             if char == '(':
                 paren_count += 1
@@ -127,23 +180,24 @@ def create_network_trace(G, layout='grid', pos=None, currency_1=0, currency_2=1,
             if paren_count == 0 and char == ',':
                 result.append('<br>')
         
-        return ''.join(result).rstrip(',<br>') + ')' ## So we don't end with a comma and add the final parenthesis
+        joined_result = ''.join(result).rstrip(',<br>') + ')'
+        
+        return number_pattern.sub(lambda m: format_float(float(m.group())), joined_result)
 
     hover_texts = [
-        f"Node: {node}<br>"
-        f"Best Vendors: {G.nodes[node]['best_vendors']}<br>"
-        f"Wallet: {G.nodes[node]['wallet']}<br>"
-        f"Currency Valuation: {G.nodes[node]['inherited_assessment']}<br>"
-        f"Price: {G.nodes[node]['price']}<br>"
-        f"Demand:<br>{format_demand(G.nodes[node]['demand'])}<br>"
-        f"Type: {G.nodes[node]['type']}"
-        for node in G.nodes()
+        f"Agent: {node}<br>"
+        f"Best Vendors: {graph.nodes[node]['best_vendors']}<br>"
+        f"Wallet: {graph.nodes[node]['wallet']}<br>"
+        f"Wallet Value: {calculate_wallet_value(graph.nodes[node]['wallet'], graph.nodes[node]['inherited_assessment']):.4e}<br>"
+        f"Currency Valuation: {graph.nodes[node]['inherited_assessment']}<br>"
+        f"Price: {format_float(graph.nodes[node]['price'])}<br>"
+        f"Demand:<br>{format_demand(graph.nodes[node]['demand'])}<br>"
+        f"Prosumer Group (vendor|customer|both): {graph.nodes[node]['type']}"
+        for node in graph.nodes()
     ]
 
-
     edge_x, edge_y = [], []
-
-    for edge in G.edges():
+    for edge in graph.edges():
         x0, y0 = pos[edge[0]]
         x1, y1 = pos[edge[1]]
         edge_x.extend([x0, x1, None])
@@ -197,7 +251,7 @@ def create_network_trace(G, layout='grid', pos=None, currency_1=0, currency_2=1,
     selected_circle = None
     if selected_node is not None:
         selected_x, selected_y = pos[selected_node]
-        selected_size = node_sizes[list(G.nodes()).index(selected_node)]
+        selected_size = node_sizes[list(graph.nodes()).index(selected_node)]
         selected_circle = go.Scatter(
             x=[selected_x],
             y=[selected_y],
@@ -211,40 +265,108 @@ def create_network_trace(G, layout='grid', pos=None, currency_1=0, currency_2=1,
             showlegend=False
         )
 
-    return edge_trace, node_trace, node_colors, selected_circle
+    shapes = []
+    annotations = []
 
-def calc_average_valuations(row, currency_1, currency_2):
+    ## only odd time steps and last step has best vendors (so excluding the first 2 steps)
+    display_transactions = time_step % 2 == 1 and prev_best_vendors is not None and any(prev_best_vendors.values())
+
+    ## next graph will only not be a thing at the last time step which should be even so 'technically' shouldn't trigger anyways
+    if display_transactions and next_graph:
+        
+        transaction_sizes = {}
+        
+        ## using wallet valuation differences (so next time step - current time step) to calculate transaction sizes
+        for node in graph.nodes():
+            current_wealth = np.array(graph.nodes[node]['wallet']) * np.array(graph.nodes[node]['inherited_assessment'])
+            next_wealth = np.array(next_graph.nodes[node]['wallet']) * np.array(next_graph.nodes[node]['inherited_assessment'])
+            
+            wealth_diff = current_wealth - next_wealth
+            
+            for vendor in prev_best_vendors.get(node, []): ## type: ignore
+                vendor_current_wealth = np.array(graph.nodes[vendor]['wallet']) * np.array(graph.nodes[vendor]['inherited_assessment'])
+                vendor_next_wealth = np.array(next_graph.nodes[vendor]['wallet']) * np.array(next_graph.nodes[vendor]['inherited_assessment'])
+                
+                vendor_wealth_diff = vendor_next_wealth - vendor_current_wealth
+                
+                transaction_size = np.sum(np.minimum(wealth_diff, vendor_wealth_diff))
+                transaction_sizes[(node, vendor)] = transaction_size
+
+        max_transaction = max(abs(size) for size in transaction_sizes.values()) if transaction_sizes else 1
+        min_width, max_width = 1, 10
+
+        for (node, vendor), transaction_size in transaction_sizes.items():
+            x0, y0 = pos[node]
+            x1, y1 = pos[vendor]
+            
+            ## Calculate midpoint and control point for the curve
+            mid_x, mid_y = (x0 + x1) / 2, (y0 + y1) / 2
+            offset = 0.2  
+            perp_x, perp_y = (y0 - y1) * offset, (x1 - x0) * offset
+            ctrl_x, ctrl_y = mid_x + perp_x, mid_y + perp_y
+            
+            ## Get the color of the originating node
+            node_color = interpolate_color(node_colors[list(graph.nodes()).index(node)])
+            
+            ## Calculate arrow width based on transaction size
+            arrow_width = min_width + (max_width - min_width) * (abs(transaction_size) / max_transaction)
+            
+            ## Determine arrow direction
+            start_x, start_y, end_x, end_y = (x0, y0, x1, y1) if transaction_size > 0 else (x1, y1, x0, y0)
+            
+            ## Create a curved path using a quadratic Bezier curve
+            shapes.append(dict(
+                type="path",
+                path=f"M {start_x},{start_y} Q {ctrl_x},{ctrl_y} {end_x},{end_y}",
+                line=dict(width=arrow_width, color=node_color)
+            ))
+            
+            ## Add a Unicode triangle at the end of the line
+            annotations.append(dict(
+                x=end_x, y=end_y,
+                xref="x", yref="y",
+                text="▶", showarrow=False,
+                font=dict(size=10 + arrow_width, color=node_color),
+                textangle=np.degrees(np.arctan2(end_y-start_y, end_x-start_x)), 
+                ax=5, ay=5
+            ))
+
+    return edge_trace, node_trace, node_colors, selected_circle, shapes, annotations
+
+def calc_average_valuations(row: pd.Series, currency_1: int, currency_2: int) -> np.ndarray:
     """Calculate the average valuation of all nodes in a row for two specified currencies"""
-    asmts = row['pricing_assessments']
-    valuation = np.array([0.0, 0.0])
-    for _, asmt in asmts.items():
-        valuation += np.array([asmt[currency_1], asmt[currency_2]])
-    valuation /= len(asmts)
-    return valuation
+    assessments = row['pricing_assessments']
+    valuations = np.array([asmt[currency_1:currency_2+1] for asmt in assessments.values()])
+    return np.mean(valuations, axis=0)
 
-def pre_calculate_force_layouts(networks):
+def pre_calculate_force_layouts(networks:List[nx.DiGraph]):
     """Pre-calculate force-directed layouts for all networks using a fixed seed"""
     random.seed(42)
     np.random.seed(42) 
 
     force_layouts = []
-    for G in networks:
-        pos = nx.spring_layout(G, k=1/np.sqrt(len(G.nodes())), iterations=50, seed=42)
+    for graph in networks:
+        pos = nx.spring_layout(graph, k=1/np.sqrt(len(graph.nodes())), iterations=50, seed=42)
         force_layouts.append(pos)
     return force_layouts
 
-def create_centrality_layout(G, k=0.1, iterations=50, central_force=0.2):
+def create_centrality_layout(graph:nx.DiGraph, k:float=0.1, iterations:int=50, central_force:float=0.2):
     """Create a centrality-based layout for a networkx graph"""
+
+    ## This one is tricky, as I mentioned to barely avoid overlap while still not allowing division by zero
+    ## I'm not sure if this is the best way to do it, speed is pretty acceptable, and every time I try to optimize it
+    ## I end up with a worse layout
+
     random.seed(42)
     np.random.seed(42)
     
     ## Eigenvector centrality with fallback to degree centrality
     try:
-        centrality = nx.eigenvector_centrality(G)
+        centrality = nx.eigenvector_centrality(graph)
     except:
-        centrality = nx.degree_centrality(G)
+        centrality = nx.degree_centrality(graph)
     
-    nodes = list(G.nodes())
+    nodes = list(graph.nodes())
     n = len(nodes)
     
     ## Initial layout
@@ -275,7 +397,7 @@ def create_centrality_layout(G, k=0.1, iterations=50, central_force=0.2):
             repulsion_factor = k * (1 + 5 * normalized_centrality[i]) 
             displacements[i] = np.sum(repulsion_factor * delta / distance[:, np.newaxis]**2, axis=0)
         
-        central_attraction = central_force * normalized_centrality[:, np.newaxis] * -layout
+        central_attraction = central_force * normalized_centrality[:, np.newaxis] * - layout # type: ignore
         
         layout += displacements + central_attraction
         
@@ -307,56 +429,50 @@ def create_centrality_layout(G, k=0.1, iterations=50, central_force=0.2):
     
     return dict(zip(nodes, layout))
 
-def pre_calculate_centrality_layouts(networks):
+def pre_calculate_centrality_layouts(networks:List[nx.DiGraph]):
     """Pre-calculate centrality-based layouts for all networks in parallel"""
     with multiprocessing.Pool() as pool:
         centrality_layouts = pool.map(create_centrality_layout, networks)
     return centrality_layouts
 
-def pre_calculate_node_metrics(networks):
+def pre_calculate_node_metrics(networks:List[nx.DiGraph]):
     """Pre-calculate node metrics for all networks"""
     node_metrics = {}
-    for t, G in enumerate(networks):
-        for node in G.nodes():
+    for t, graph in enumerate(networks):
+        for node in graph.nodes():
             if node not in node_metrics:
-                node_metrics[node] = {
-                    'wallet': [],
-                    'price': [],
-                    'inherited_assessment': [],
-                    'pricing_assessment': [],
-                    'demand': []
-                }
+                node_metrics[node] = {metric: [] for metric in ['wallet', 'wallet_value', 'price', 'inherited_assessment', 'pricing_assessment', 'demand']}
             
-            node_data = G.nodes[node]
-            node_metrics[node]['wallet'].append(node_data['wallet'])
-            node_metrics[node]['price'].append(node_data['price'])
-            node_metrics[node]['inherited_assessment'].append(node_data['inherited_assessment'])
-            node_metrics[node]['pricing_assessment'].append(node_data['pricing_assessment'])
-            node_metrics[node]['demand'].append(node_data['demand'])
+            node_data = graph.nodes[node]
+            for metric in node_metrics[node]:
+                if metric == 'wallet_value':
+                    node_metrics[node][metric].append(calculate_wallet_value(node_data['wallet'], node_data['inherited_assessment']))
+                else:
+                    node_metrics[node][metric].append(node_data[metric])
     
     return node_metrics
 
-def fast_process_time_step(time_step, networks, node_metrics, currency_pairs, num_timesteps):
+def fast_process_time_step(time_step, networks, node_metrics, currency_pairs):
     """Process a single time step and return traces for the wallet, currency scatter, and node metrics"""
-    G = networks[time_step]
-    nodes = list(G.nodes())
+    graph = networks[time_step]
+    nodes = list(graph.nodes())
     time_range = np.arange(time_step + 1)
     
-    ## Wallet amount traces
-    wallet_sums = np.array([[sum(node_metrics[node]['wallet'][t]) for t in range(time_step + 1)] for node in nodes])
+    ## Wallet value traces
+    wallet_values = np.array([[node_metrics[node]['wallet_value'][t] for t in range(time_step + 1)] for node in nodes])
     wallet_traces = [
         dict(
             x=time_range,
             y=values,
             mode='lines',
-            name=f'Node {node}',
+            name=f'Agent {node}',
             line=dict(width=1),
             hoverinfo='text',
             hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black"),
-            text=[f"Node: {node}<br>Time Step: {t}<br>Total Wallet: {v:.4f}" for t, v in enumerate(values)],
+            text=[f"Agent: {node}<br>Time Step: {t}<br>Total Wallet Value: {v:.4e}" for t, v in enumerate(values)],
             showlegend=False,
             visible=False
-        ) for node, values in zip(nodes, wallet_sums)
+        ) for node, values in zip(nodes, wallet_values)
     ]
     
     ## Currency scatter traces
@@ -370,10 +486,10 @@ def fast_process_time_step(time_step, networks, node_metrics, currency_pairs, nu
             y=scatter_y,
             mode='markers',
             marker=dict(size=8, showscale=False),
-            text=[f"Node: {node}<br>Time Step: {time_step}<br>Currency {currency_1+1} Assessment: {x:.4f}<br>Currency {currency_2+1} Assessment: {y:.4f}" for node, x, y in zip(nodes, scatter_x, scatter_y)],
+            text=[f"Agent: {node}<br>Time Step: {time_step}<br>Currency {currency_1+1} Valuation: {x:.4e}<br>Currency {currency_2+1} Valuation: {y:.4e}" for node, x, y in zip(nodes, scatter_x, scatter_y)],
             hoverinfo='text',
             hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black"),
-            name='Pricing Assessments',
+            name='Pricing Valuations',
             visible=False
         )
     
@@ -394,7 +510,7 @@ def fast_process_time_step(time_step, networks, node_metrics, currency_pairs, nu
                 visible=False,
                 hoverinfo='text',
                 hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black"),
-                text=[f"Node: {node}<br>Time Step: {t}<br>Wallet Currency {i+1}: {v:.4f}" for t, v in enumerate(wallet_data[i])]
+                text=[f"Agent: {node}<br>Time Step: {t}<br>Wallet Currency {i+1}: {v}" for t, v in enumerate(wallet_data[i])]
             )
             node_traces[f'cv_{i}'] = dict(
                 x=time_range, 
@@ -404,7 +520,7 @@ def fast_process_time_step(time_step, networks, node_metrics, currency_pairs, nu
                 visible=False,
                 hoverinfo='text',
                 hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black"),
-                text=[f"Node: {node}<br>Time Step: {t}<br>Currency Valuation {i+1}: {v:.4f}" for t, v in enumerate(currency_valuation_data[i])]
+                text = [f"Agent: {node}<br>Time Step: {t}<br>Currency Valuation {i+1}: {v:.4e}" for t, v in enumerate(currency_valuation_data[i])]
             )
         
         price_data = np.array(node_metrics[node]['price'][:time_step+1])
@@ -416,7 +532,7 @@ def fast_process_time_step(time_step, networks, node_metrics, currency_pairs, nu
             visible=False,
             hoverinfo='text',
             hoverlabel=dict(bgcolor="white", font_size=12, font_family="Arial", font_color="black"),
-            text=[f"Node: {node}<br>Time Step: {t}<br>Price: {v:.4f}" for t, v in enumerate(price_data)]
+            text=[f"Agent: {node}<br>Time Step: {t}<br>Price: {v:.4f}" for t, v in enumerate(price_data)]
         )
         
         node_metric_traces[node] = node_traces
@@ -433,7 +549,7 @@ def pre_calculate_traces(networks, node_metrics, num_timesteps, currency_pairs):
     }
     
     process_func = partial(fast_process_time_step, networks=networks, node_metrics=node_metrics, 
-                           currency_pairs=currency_pairs, num_timesteps=num_timesteps)
+                           currency_pairs=currency_pairs)
     
     with ProcessPoolExecutor() as executor:
         results = executor.map(process_func, range(num_timesteps + 1))
@@ -445,13 +561,20 @@ def pre_calculate_traces(networks, node_metrics, num_timesteps, currency_pairs):
     
     return all_traces
 
-def get_currency_pairs(df):
+def get_currency_pairs(df:pd.DataFrame) -> List[Tuple[int, int]]:
     """Get all possible currency pairs from the DataFrame"""
     sample_wallet = df.iloc[0]['grid'].nodes[list(df.iloc[0]['grid'].nodes)[0]]['agent'].wallet
     currencies = range(len(sample_wallet))
     return list(combinations(currencies, 2))
 
-def load_data_and_prepare_layouts():
+def load_data_and_prepare_layouts() -> Tuple[pd.DataFrame,
+                                                List[nx.DiGraph],
+                                                int,
+                                                List[Tuple[int, int]],
+                                                List[Dict[int, Tuple[float, float]]],
+                                                List[Dict[int, Tuple[float, float]]],
+                                                Dict[str, Any]]:
+    
     """Load the simulation data and pre-calculate layouts and metrics"""
     df = load_simulation_data(get_latest_sim())
     networks = create_time_evolving_network(df)
@@ -473,7 +596,15 @@ def load_data_and_prepare_layouts():
 
     return df, networks, num_timesteps, currency_pairs, force_layouts, centrality_layouts, node_metrics
 
-def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, centrality_layouts, node_metrics, all_traces):
+def create_dash_app(df:pd.DataFrame,
+                     networks:List[nx.DiGraph],
+                     num_timesteps:int, 
+                     currency_pairs:List[Tuple[int, int]], 
+                     force_layouts:List[Dict[int, Tuple[float, float]]], 
+                     centrality_layouts:List[Dict[int, Tuple[float, float]]], 
+                     all_traces:Dict[str, Any]) -> Dash:
+    
+    """Create the Dash app with the given parameters"""
     app = dash.Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
     num_currencies = len(df.iloc[0]['grid'].nodes[list(df.iloc[0]['grid'].nodes)[0]]['agent'].wallet)
 
@@ -540,6 +671,19 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
                         'fontSize': '12px'
                     }
                 ),
+                dcc.RadioItems(
+                    id='show-transactions',
+                    options=[
+                        {'label': 'Show Transactions', 'value': 'show'},
+                        {'label': 'Hide Transactions', 'value': 'hide'}
+                    ],
+                    value='hide',
+                    inline=True,
+                    style={
+                        'marginTop': '10px',
+                        'fontSize': '12px'
+                    }
+                ),
             ], style={'width': '200px', 'position': 'absolute', 'left': '10px', 'top': '50px', 'zIndex': '1000'}),
             dcc.Graph(id='network-graph', style={'height': '80vh', 'width': 'calc(100% - 220px)', 'marginLeft': '220px'}),
         ], style={'position': 'relative', 'height': '80vh'}),
@@ -557,10 +701,14 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
             ),
             dcc.Dropdown(
                 id='attribute-dropdown',
-                options=[{'label': 'All', 'value': 'all'},
-                        {'label': 'Price', 'value': 'price'}] +
-                        [{'label': f'Currency Valuation {i+1}', 'value': f'currency_valuation_{i}'} for i in range(num_currencies)] +
-                        [{'label': f'Wallet Currency {i+1}', 'value': f'wallet_currency_{i}'} for i in range(num_currencies)],
+                options=[
+                    {'label': 'All', 'value': 'all'},
+                    {'label': 'Price', 'value': 'price'},
+                    {'label': 'All Currencies', 'value': 'all_currencies'},
+                    {'label': 'All Valuations', 'value': 'all_valuations'}
+                ] +
+                [{'label': f'Currency Valuation {i+1}', 'value': f'currency_valuation_{i}'} for i in range(num_currencies)] +
+                [{'label': f'Wallet Currency {i+1}', 'value': f'wallet_currency_{i}'} for i in range(num_currencies)],
                 value='all',
                 clearable=False,
                 searchable=False,
@@ -599,22 +747,33 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
         Input('currency-pair-dropdown', 'value'),
         Input('attribute-dropdown', 'value'),
         Input('wallet-lines-dropdown', 'value'),
-        Input('network-graph', 'clickData')]
+        Input('network-graph', 'clickData'),
+        Input('show-transactions', 'value')]
     )
-    def update_graph(time_step, layout, currency_pair, selected_attribute, num_wallet_lines, clickData):
-        G = networks[time_step]
+    def update_graph(time_step:int, layout:str, currency_pair:str, selected_attribute:str, num_wallet_lines:int, clickData:dict, show_transactions:str) -> go.Figure:
+        
+        global previous_node
 
+        graph = networks[time_step]
+        next_graph = networks[time_step + 1] if time_step < num_timesteps else None
+
+        ## Sometimes if the user clicks weirdly it'll return None which will crash the entire simulation
+        ## We can just revert to the previous node in that case
         if clickData:
             try:
                 selected_node = eval(clickData['points'][0]['text'].split('<br>')[0].split(': ')[1])
+                previous_node = selected_node
             except:
-                selected_node = None
+                selected_node = previous_node
         else:
             random.seed(42)
-            selected_node = random.choice(list(G.nodes()))
+            selected_node = random.choice(list(graph.nodes()))
+            previous_node = selected_node
 
         currency_1, currency_2 = map(int, currency_pair.split(','))
             
+        prev_best_vendors = {node: next_graph.nodes[node]['best_vendors'] for node in next_graph.nodes()} if next_graph else None
+
         fig = make_subplots(rows=3, cols=2, 
                             column_widths=[0.7, 0.3],
                             row_heights=[0.33, 0.33, 0.33],
@@ -627,35 +786,46 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
                             horizontal_spacing=0.08, 
                             subplot_titles=[
                                 "", 
-                                f"Currency {currency_1+1} vs {currency_2+1} Assessments",
-                                f"Node Metrics for Node {selected_node}",
-                                "Total Wallet Amount Over Time"
+                                f"Currency {currency_1+1} vs {currency_2+1} Valuations",
+                                f"Agent Metrics for Agent {selected_node}",
+                                "Total Wallet Value Over Time"
                             ])
         
         ## Network graph (left side, full height)
         if layout == 'force':
-            edge_trace, node_trace, node_colors, selected_circle = create_network_trace(G, layout='force', pos=force_layouts[time_step], currency_1=currency_1, currency_2=currency_2, selected_node=selected_node)
+            edge_trace, node_trace, node_colors, selected_circle, shapes, annotations = create_network_trace(
+                graph, layout='force', pos=force_layouts[time_step], currency_1=currency_1, currency_2=currency_2, 
+                selected_node=selected_node, prev_best_vendors=prev_best_vendors, time_step=time_step, next_graph=next_graph
+            )
         elif layout == 'centrality':
-            edge_trace, node_trace, node_colors, selected_circle = create_network_trace(G, layout='force', pos=centrality_layouts[time_step], currency_1=currency_1, currency_2=currency_2, selected_node=selected_node)
+            edge_trace, node_trace, node_colors, selected_circle, shapes, annotations = create_network_trace(
+                graph, layout='force', pos=centrality_layouts[time_step], currency_1=currency_1, currency_2=currency_2, 
+                selected_node=selected_node, prev_best_vendors=prev_best_vendors, time_step=time_step, next_graph=next_graph
+            )
         else:
-            edge_trace, node_trace, node_colors, selected_circle = create_network_trace(G, layout='grid', currency_1=currency_1, currency_2=currency_2, selected_node=selected_node)
-        
+            edge_trace, node_trace, node_colors, selected_circle, shapes, annotations = create_network_trace(
+                graph, layout='grid', currency_1=currency_1, currency_2=currency_2, 
+                selected_node=selected_node, prev_best_vendors=prev_best_vendors, time_step=time_step, next_graph=next_graph
+            )
+            
         fig.add_trace(edge_trace, row=1, col=1)
         fig.add_trace(node_trace, row=1, col=1)
         if selected_circle:
             fig.add_trace(selected_circle, row=1, col=1)
 
+        if(show_transactions == 'show'):
+            fig.update_layout(shapes=shapes, annotations=annotations)
+
         if layout == 'grid':
-            grid_size = int(np.sqrt(len(G.nodes())))
-            x_range = [-0.5, grid_size - 0.5]
-            y_range = [-0.5, grid_size - 0.5]
+            grid_size = int(np.sqrt(len(graph.nodes())))
+            x_range = y_range = [-0.5, grid_size - 0.5]
         else:  ## For force-directed and centrality-based layouts
-            x_coords = node_trace.x
-            y_coords = node_trace.y
-            x_min, x_max = min(x_coords), max(x_coords)
-            y_min, y_max = min(y_coords), max(y_coords)
-            x_range = [x_min - 0.1 * (x_max - x_min), x_max + 0.1 * (x_max - x_min)]
-            y_range = [y_min - 0.1 * (y_max - y_min), y_max + 0.1 * (y_max - y_min)]
+            x_coords, y_coords = node_trace.x, node_trace.y
+            x_min, x_max = min(x_coords), max(x_coords)  ## type: ignore (Tricky cause Plotly is a bit weird with types)
+            y_min, y_max = min(y_coords), max(y_coords)  ## type: ignore (Tricky cause Plotly is a bit weird with types)
+            padding = 0.1
+            x_range = [x_min - padding * (x_max - x_min), x_max + padding * (x_max - x_min)]
+            y_range = [y_min - padding * (y_max - y_min), y_max + padding * (y_max - y_min)]
 
         fig.update_xaxes(range=x_range, row=1, col=1)
         fig.update_yaxes(range=y_range, row=1, col=1)
@@ -672,7 +842,7 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
         scatter_trace_dict['marker'] = dict(
             size=8,
             color=node_colors,
-            colorscale=node_trace.marker.colorscale,
+            colorscale=node_trace.marker.colorscale, # type: ignore (this exists you dumb linter)
             showscale=False
         )
         scatter_trace_dict['visible'] = True
@@ -683,34 +853,36 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
         node_traces = all_traces['node_metric_traces'][(time_step, selected_node)]
         
         ## Attribute selection
-        if selected_attribute == 'all':
-            for trace_key, trace_dict in node_traces.items():
-                trace_dict['visible'] = True
-                trace = go.Scattergl(**trace_dict)
-                fig.add_trace(trace, row=2, col=2)
-            y_axis_title = "All Values"
+        trace_configs = {
+            'all': list(node_traces.items()),
+            'price': [('price', node_traces['price'])],
+            'all_currencies': [(f'wallet_{i}', node_traces[f'wallet_{i}']) for i in range(num_currencies)],
+            'all_valuations': [(f'cv_{i}', node_traces[f'cv_{i}']) for i in range(num_currencies)],
+        }
 
-        elif selected_attribute == 'price':
-            node_traces['price']['visible'] = True
-            trace = go.Scattergl(**node_traces['price'])
-            fig.add_trace(trace, row=2, col=2)
-            y_axis_title = "Price"
-
-        elif selected_attribute.startswith('currency_valuation_'):
+        if selected_attribute.startswith('currency_valuation_'):
             currency_index = int(selected_attribute.split('_')[-1])
-            node_traces[f'cv_{currency_index}']['visible'] = True
-            trace = go.Scattergl(**node_traces[f'cv_{currency_index}'])
-            fig.add_trace(trace, row=2, col=2)
-            y_axis_title = f"Currency Valuation {currency_index+1}"
-
+            trace_configs[selected_attribute] = [(f'cv_{currency_index}', node_traces[f'cv_{currency_index}'])]
         elif selected_attribute.startswith('wallet_currency_'):
             currency_index = int(selected_attribute.split('_')[-1])
-            node_traces[f'wallet_{currency_index}']['visible'] = True
-            trace = go.Scattergl(**node_traces[f'wallet_{currency_index}'])
-            fig.add_trace(trace, row=2, col=2)
-            y_axis_title = f"Wallet Currency {currency_index+1}"
+            trace_configs[selected_attribute] = [(f'wallet_{currency_index}', node_traces[f'wallet_{currency_index}'])]
+
+        if selected_attribute not in trace_configs:
+            raise ValueError(f"Invalid attribute: {selected_attribute}")
+
+        for _, trace_dict in trace_configs.get(selected_attribute, []):
+            trace_dict['visible'] = True
+            fig.add_trace(go.Scattergl(**trace_dict), row=2, col=2)
+
+        y_axis_titles = {
+            'all': "All Values",
+            'price': "Price",
+            'all_currencies': "All Currencies",
+            'all_valuations': "All Valuations",
+        }
+        y_axis_title = y_axis_titles.get(selected_attribute, selected_attribute.replace('_', ' ').title())
         
-        ## Wallet amount line graph (bottom right)
+        ## Wallet value line graph (bottom right)
         sorted_traces = sorted(all_traces['wallet_traces'][time_step], 
                             key=lambda trace_dict: max(trace_dict['y'][:time_step+1]), 
                             reverse=True)
@@ -741,9 +913,8 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
                             type="log", exponentformat="power", showexponent="all",
                             title_standoff=2)
         
-        avg_asmt = calc_average_valuations(df.iloc[time_step], currency_1, currency_2)
-        currency_valuations = [f'Currency {currency_1+1}: {avg_asmt[0]:.2e}', f'Currency {currency_2+1}: {avg_asmt[1]:.2e}']
-        title = f"Time Step: {time_step} | Average Valuations: {', '.join(currency_valuations)}"
+        num_agents = len(graph.nodes())
+        title = f"Simulation of an Index Wallet Marketplace with {num_agents} agents | Current Time Step: {time_step}/{num_timesteps}"
         
         fig.update_layout(
             title=dict(
@@ -763,10 +934,10 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
         fig.update_xaxes(showgrid=False, zeroline=False, showticklabels=False, row=1, col=1)
         fig.update_yaxes(showgrid=False, zeroline=False, showticklabels=False, row=1, col=1)
 
-        fig.update_xaxes(title_text=f"Currency {currency_1+1} Assessment", row=1, col=2, 
+        fig.update_xaxes(title_text=f"Currency {currency_1+1} Valuation", row=1, col=2, 
                             type="log", exponentformat="power", showexponent="all",
                             title_standoff=2)
-        fig.update_yaxes(title_text=f"Currency {currency_2+1}<br>Assessment", row=1, col=2, 
+        fig.update_yaxes(title_text=f"Currency {currency_2+1}<br>Valuation", row=1, col=2, 
                         type="log", exponentformat="power", showexponent="all",
                         title_standoff=2)
         
@@ -784,8 +955,11 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
             uirevision='constant'
         )
         
-        for i in range(len(fig.layout.annotations)):
-            fig.layout.annotations[i].text += f" (Step {time_step})"
+        ## If it's part of the network graph arrow annotation, don't update it
+        ## Also it does have the annotations attribute but plotly has jack for type hints so it's a bit annoying
+        for i in range(len(fig.layout.annotations)): # type: ignore
+            if("▶" not in fig.layout.annotations[i].text): # type: ignore
+                fig.layout.annotations[i].text += f" (Step {time_step})"  # type: ignore
 
         for row in range(1, 4):
             for col in range(1, 3):
@@ -802,7 +976,7 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
          State('time-slider', 'max'),
          State('interval-component', 'disabled')]
     )
-    def update_slider(n, current_value, max_value, is_disabled):
+    def update_slider(n_intervals:int, current_value:int, max_value:int, is_disabled:bool) -> int:
         """Update the time slider value"""
         if is_disabled:
             raise PreventUpdate
@@ -816,7 +990,7 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
         [Input('time-slider', 'value')],
         [State('wallet-lines-dropdown', 'value')] 
     )
-    def update_wallet_lines_dropdown(time_step, current_value):
+    def update_wallet_lines_dropdown(time_step:int, current_value:int) -> Tuple[List[Dict[str, Any]], int]:
         num_nodes = len(networks[time_step].nodes())
         
         ## Generate options based on the number of nodes
@@ -837,7 +1011,7 @@ def create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, 
 
     return app
 
-def prepare_and_get_dash_app(is_debug=True):
+def prepare_and_get_dash_app(is_debug:bool=True) -> Dash:
     """Prepare the data and create the Dash app"""
 
     ## Setup logging
@@ -861,7 +1035,7 @@ def prepare_and_get_dash_app(is_debug=True):
     all_traces = pre_calculate_traces(networks, node_metrics, num_timesteps, currency_pairs)
 
     logging.info("Creating Dash app...") 
-    app:dash = create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, centrality_layouts, node_metrics, all_traces)
+    app:Dash = create_dash_app(df, networks, num_timesteps, currency_pairs, force_layouts, centrality_layouts, all_traces)
 
     ## This callback is used to toggle the play/pause button
     ## It's in javascript because the python one would not work
@@ -913,4 +1087,4 @@ if __name__ == '__main__':
 
     app = prepare_and_get_dash_app()
 
-    app.run(debug=True, port=8050)
+    app.run(debug=True, port="8050")
